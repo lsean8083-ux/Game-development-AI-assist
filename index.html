@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>星尘港湾 · Stardust Harbor</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02040a; }
+  body { cursor: crosshair; -webkit-font-smoothing: antialiased; }
+  #stage { display: block; width: 100vw; height: 100vh; }
+  #stage:active { cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  /* ============================================================
+     星尘港湾 Stardust Harbor
+     2D 休闲解压 · 科幻 · 单文件 Canvas 2D
+     ============================================================ */
+
+  var canvas = document.getElementById('stage');
+  var ctx = canvas.getContext('2d', { alpha: false });
+  var TAU = Math.PI * 2;
+
+  var clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
+  var lerp = function (a, b, t) { return a + (b - a) * t; };
+  var rand = function (a, b) { return a + Math.random() * (b - a); };
+  var dist2 = function (ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
+
+  var W = 0, H = 0, DPR = 1;
+
+  /* ------------------------------------------------------------
+     配色（三套候选）
+     ------------------------------------------------------------ */
+  var PALETTES = [
+    {
+      id: 'aurora', name: '极光青', en: 'AURORA CYAN',
+      hull1: '#0a2233', hull2: '#3ae6c8', edge: '#c4fff6',
+      core: '#e6fffb', glow: '#2ff0d0', accent: '#7ef0ff',
+      neb: ['#0d5f74', '#183d8f', '#0b7f6e'],
+      bg1: '#071a26', bg2: '#02050c', star: '#cfeeff'
+    },
+    {
+      id: 'pulse', name: '绯红脉冲', en: 'CRIMSON PULSE',
+      hull1: '#2a0a1a', hull2: '#ff4f86', edge: '#ffd6e4',
+      core: '#ffe4ee', glow: '#ff3d78', accent: '#ff9ac0',
+      neb: ['#7a1040', '#3a1266', '#5c1240'],
+      bg1: '#190713', bg2: '#06020a', star: '#ffdce8'
+    },
+    {
+      id: 'ember', name: '琥珀星火', en: 'AMBER EMBER',
+      hull1: '#2b1a08', hull2: '#ffc35c', edge: '#fff0cc',
+      core: '#fff6dd', glow: '#ffab3d', accent: '#ffd98a',
+      neb: ['#8f4a12', '#6b1f3a', '#7a5a10'],
+      bg1: '#1a1206', bg2: '#070402', star: '#ffeccb'
+    }
+  ];
+  var palette = PALETTES[0];
+
+  /* ------------------------------------------------------------
+     颜色工具 / 精灵缓存
+     ------------------------------------------------------------ */
+  var rgbCache = {};
+  function hexToRgb(hex) {
+    if (rgbCache[hex]) return rgbCache[hex];
+    var h = hex.replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    var o = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    rgbCache[hex] = o;
+    return o;
+  }
+  function rgba(hex, a) {
+    var c = hexToRgb(hex);
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+  }
+
+  var spriteCache = {};
+  function glowSprite(color, size) {
+    size = size || 128;
+    var key = color + '@' + size;
+    if (spriteCache[key]) return spriteCache[key];
+    var s = document.createElement('canvas');
+    s.width = s.height = size;
+    var g = s.getContext('2d');
+    var c = size / 2;
+    var grd = g.createRadialGradient(c, c, 0, c, c, c);
+    grd.addColorStop(0, rgba(color, 1));
+    grd.addColorStop(0.22, rgba(color, 0.55));
+    grd.addColorStop(0.5, rgba(color, 0.2));
+    grd.addColorStop(0.75, rgba(color, 0.05));
+    grd.addColorStop(1, rgba(color, 0));
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+    spriteCache[key] = s;
+    return s;
+  }
+
+  var nebCache = {};
+  function nebSprite(ci) {
+    var key = palette.id + ':' + ci;
+    if (nebCache[key]) return nebCache[key];
+    var size = 256, c = size / 2;
+    var s = document.createElement('canvas');
+    s.width = s.height = size;
+    var g = s.getContext('2d');
+    var col = palette.neb[ci];
+    var grd = g.createRadialGradient(c, c, 0, c, c, c);
+    grd.addColorStop(0, rgba(col, 0.6));
+    grd.addColorStop(0.35, rgba(col, 0.3));
+    grd.addColorStop(0.68, rgba(col, 0.09));
+    grd.addColorStop(1, rgba(col, 0));
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+    nebCache[key] = s;
+    return s;
+  }
+
+  /* ------------------------------------------------------------
+     游戏状态
+     ------------------------------------------------------------ */
+  var G = {
+    state: 'title',   // title | play | paused
+    time: 0,
+    playT: 0,
+    sector: 1,
+    energy: 0,
+    goal: 46,
+    collected: 0,
+    ringsPass: 0,
+    flash: 0,
+    toast: null,
+    muted: false,
+    paletteIdx: 0
+  };
+
+  var player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI / 2, thrust: 0, trail: [] };
+  var camera = { x: 0, y: 0 };
+
+  var input = { aim: false, mx: 0, my: 0, kLeft: false, kRight: false, kUp: false, kDown: false };
+
+  var motes = [];
+  var rings = [];
+  var particles = [];
+  var nebulas = [];
+  var starLayers = [];
+  var streaks = [];
+  var shocks = [];
+
+  // 烘焙贴图：整屏背景 / 暗角 / 半分辨率星云
+  var bgBaked = document.createElement('canvas');
+  var vigBaked = document.createElement('canvas');
+  var nebCanvas = document.createElement('canvas');
+  var nebCtx = nebCanvas.getContext('2d');
+  var NEB_SCALE = 0.25;
+  var muteRect = { x: 0, y: 0, w: 34, h: 34 };
+
+  /* ------------------------------------------------------------
+     尺寸
+     ------------------------------------------------------------ */
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    buildStreaks();
+    buildBaked();
+  }
+
+  function buildBaked() {
+    var bw = W + 160, bh = H + 160;
+    bgBaked.width = bw; bgBaked.height = bh;
+    var g = bgBaked.getContext('2d');
+    var cx = W * 0.5 + 80, cy = H * 0.44 + 80;
+    var bg = g.createRadialGradient(cx, cy, 0, cx, H * 0.46 + 80, Math.max(W, H) * 0.9);
+    bg.addColorStop(0, palette.bg1);
+    bg.addColorStop(1, palette.bg2);
+    g.fillStyle = bg;
+    g.fillRect(0, 0, bw, bh);
+
+    var hx = W * 0.6 + 80, hy = H * 0.34 + 80;
+    var hz = g.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.85);
+    hz.addColorStop(0, rgba(palette.neb[0], 0.24));
+    hz.addColorStop(0.45, rgba(palette.neb[1], 0.10));
+    hz.addColorStop(1, rgba(palette.bg2, 0));
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = hz;
+    g.fillRect(0, 0, bw, bh);
+    g.globalCompositeOperation = 'source-over';
+
+    vigBaked.width = Math.max(1, Math.ceil(W));
+    vigBaked.height = Math.max(1, Math.ceil(H));
+    var v = vigBaked.getContext('2d');
+    var vg = v.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34, W / 2, H / 2, Math.max(W, H) * 0.78);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(1,3,7,0.7)');
+    v.fillStyle = vg;
+    v.fillRect(0, 0, W, H);
+
+    nebCanvas.width = Math.max(1, Math.ceil(W * NEB_SCALE));
+    nebCanvas.height = Math.max(1, Math.ceil(H * NEB_SCALE));
+    nebCtx = nebCanvas.getContext('2d');
+  }
+
+  function buildStreaks() {
+    streaks = [];
+    for (var i = 0; i < 26; i++) {
+      streaks.push({ x: Math.random() * W, y: Math.random() * H, z: rand(0.3, 1) });
+    }
+  }
+
+  /* ------------------------------------------------------------
+     世界生成
+     ------------------------------------------------------------ */
+  function buildStarfield() {
+    starLayers = [];
+    var cfg = [
+      { n: 240, size: 1.0, par: 0.055, alpha: 0.55, speed: 0.6 },
+      { n: 150, size: 1.6, par: 0.13, alpha: 0.72, speed: 0.95 },
+      { n: 70, size: 2.3, par: 0.26, alpha: 0.95, speed: 1.35 }
+    ];
+    for (var i = 0; i < cfg.length; i++) {
+      var c = cfg[i];
+      var arr = [];
+      for (var j = 0; j < c.n; j++) {
+        arr.push({ x: Math.random(), y: Math.random(), p: Math.random() * TAU, a: rand(0.35, 1) });
+      }
+      starLayers.push({ size: c.size, par: c.par, alpha: c.alpha, speed: c.speed, stars: arr });
+    }
+  }
+
+  function initNebulas() {
+    nebulas = [];
+    for (var i = 0; i < 14; i++) nebulas.push(newNebula(true));
+  }
+
+  function newNebula(initial) {
+    var a = Math.random() * TAU;
+    var d = initial ? rand(0, 2600) : rand(600, 2600);
+    return {
+      x: camera.x + Math.cos(a) * d,
+      y: camera.y + Math.sin(a) * d,
+      r: rand(380, 900),
+      ci: (Math.random() * 3) | 0,
+      a: rand(0.14, 0.40),
+      phase: Math.random() * TAU,
+      drift: rand(0.03, 0.12)
+    };
+  }
+
+  // 屏幕外环带生成，且偏向行进方向 —— 保证视野内密度稳定
+  function recycleR() {
+    return Math.sqrt(W * W + H * H) * 0.62;
+  }
+
+  function spawnPos() {
+    var R = recycleR();
+    var sp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    var ang = sp > 40
+      ? Math.atan2(player.vy, player.vx) + rand(-2.0, 2.0)
+      : Math.random() * TAU;
+    var d = rand(R * 0.84, R * 0.98);
+    return { x: camera.x + Math.cos(ang) * d, y: camera.y + Math.sin(ang) * d };
+  }
+
+  function newMote(initial) {
+    var P;
+    if (initial) {
+      P = { x: camera.x + rand(-W * 0.85, W * 0.85), y: camera.y + rand(-H * 0.85, H * 0.85) };
+    } else {
+      // 星尘在视野圆盘内均匀重生，保证屏幕中也有东西可收
+      var R = recycleR();
+      var a = Math.random() * TAU;
+      var d = 120 + Math.sqrt(Math.random()) * (R * 0.95 - 120);
+      P = { x: camera.x + Math.cos(a) * d, y: camera.y + Math.sin(a) * d };
+    }
+    return {
+      x: P.x,
+      y: P.y,
+      r: rand(2.2, 5.0),
+      phase: Math.random() * TAU,
+      bob: rand(6, 22),
+      spd: rand(0.5, 1.4),
+      tone: (Math.random() * 3) | 0,
+      born: G.time
+    };
+  }
+
+  function newRing(initial) {
+    var P = initial
+      ? { x: camera.x + rand(-W * 0.8, W * 0.8), y: camera.y + rand(-H * 0.8, H * 0.8) }
+      : spawnPos();
+    return {
+      x: P.x,
+      y: P.y,
+      r: rand(100, 190),
+      rot: Math.random() * TAU,
+      spin: rand(-0.35, 0.35),
+      phase: Math.random() * TAU,
+      passed: false,
+      passT: 0,
+      born: G.time
+    };
+  }
+
+  function resetWorld() {
+    player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
+    player.angle = -Math.PI / 2; player.thrust = 0; player.trail.length = 0;
+    camera.x = 0; camera.y = 0;
+    particles.length = 0; motes.length = 0; rings.length = 0; shocks.length = 0;
+    G.sector = 1; G.energy = 0; G.collected = 0; G.ringsPass = 0;
+    G.flash = 0; G.toast = null; G.playT = 0;
+    var i;
+    for (i = 0; i < 60; i++) motes.push(newMote(true));
+    for (i = 0; i < 8; i++) rings.push(newRing(true));
+    initNebulas();
+  }
+
+  /* ------------------------------------------------------------
+     粒子
+     ------------------------------------------------------------ */
+  function spawnBurst(x, y, tone, count, speed) {
+    for (var i = 0; i < count; i++) {
+      if (particles.length > 520) particles.shift();
+      var a = Math.random() * TAU;
+      var sp = rand(speed * 0.25, speed);
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: rand(0.4, 1.1),
+        max: 1.1,
+        size: rand(0.9, 2.3),
+        tone: tone
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------
+     音频（Web Audio 实时合成，无素材文件）
+     ------------------------------------------------------------ */
+  var sound = {
+    ready: false,
+    ctx: null,
+    master: null,
+    reverbIn: null,
+    muted: false,
+
+    init: function () {
+      if (this.ready) return;
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try {
+        var ac = new AC();
+        this.ctx = ac;
+        var master = ac.createGain();
+        master.gain.value = this.muted ? 0 : 0.85;
+        master.connect(ac.destination);
+        this.master = master;
+
+        // 混响（程序生成脉冲响应）
+        var conv = ac.createConvolver();
+        conv.buffer = this.impulse(2.4, 2.6);
+        var rv = ac.createGain();
+        rv.gain.value = 0.5;
+        conv.connect(rv);
+        rv.connect(master);
+        this.reverbIn = conv;
+
+        this.startPad();
+        this.ready = true;
+      } catch (e) {
+        this.ready = false;
+      }
+    },
+
+    impulse: function (seconds, decay) {
+      var ac = this.ctx;
+      var len = Math.floor(ac.sampleRate * seconds);
+      var buf = ac.createBuffer(2, len, ac.sampleRate);
+      for (var ch = 0; ch < 2; ch++) {
+        var d = buf.getChannelData(ch);
+        for (var i = 0; i < len; i++) {
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+        }
+      }
+      return buf;
+    },
+
+    startPad: function () {
+      var ac = this.ctx;
+      var pad = ac.createGain();
+      pad.gain.value = 0.0001;
+      pad.connect(this.master);
+      var filt = ac.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 380;
+      filt.Q.value = 0.8;
+      filt.connect(pad);
+
+      var ratios = [1, 1.5, 2, 3, 4.5];
+      for (var i = 0; i < ratios.length; i++) {
+        var o = ac.createOscillator();
+        o.type = (i % 2) ? 'sine' : 'triangle';
+        o.frequency.value = 55 * ratios[i] * (1 + (i - 2) * 0.0016);
+        var g = ac.createGain();
+        g.gain.value = 0.22 / (i + 1);
+        o.connect(g);
+        g.connect(filt);
+        o.start();
+      }
+      // 缓慢呼吸
+      var lfo = ac.createOscillator();
+      lfo.frequency.value = 0.045;
+      var lg = ac.createGain();
+      lg.gain.value = 150;
+      lfo.connect(lg);
+      lg.connect(filt.frequency);
+      lfo.start();
+
+      pad.gain.setTargetAtTime(0.07, ac.currentTime + 0.1, 2.5);
+      this.padGain = pad;
+    },
+
+    note: function (freq, vel, dur, when) {
+      if (!this.ready || this.muted) return;
+      var ac = this.ctx;
+      var t0 = ac.currentTime + (when || 0);
+      vel = vel || 0.14;
+      dur = dur || 1.8;
+      var partials = [[1, 1, 'sine'], [2.004, 0.3, 'sine'], [3.01, 0.08, 'triangle']];
+      for (var i = 0; i < partials.length; i++) {
+        var p = partials[i];
+        var o = ac.createOscillator();
+        o.type = p[2];
+        o.frequency.value = freq * p[0];
+        var g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0003, vel * p[1]), t0 + 0.014);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g);
+        g.connect(this.master);
+        g.connect(this.reverbIn);
+        o.start(t0);
+        o.stop(t0 + dur + 0.06);
+      }
+    },
+
+    collect: function (n) {
+      if (!this.ready) return;
+      var SC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31, 33];
+      var i = n % (SC.length + 2);
+      var semi = SC[Math.min(i, SC.length - 1)] + Math.floor(i / SC.length) * 12;
+      var f = 261.63 * Math.pow(2, semi / 12);
+      this.note(f, 0.12, 1.9);
+      this.note(f * 2, 0.03, 1.1);
+    },
+
+    ring: function () {
+      this.note(392.0, 0.10, 2.9);
+      this.note(587.33, 0.055, 3.1);
+      this.note(783.99, 0.03, 3.3);
+    },
+
+    sectorUp: function () {
+      var base = 261.63;
+      var steps = [0, 4, 7, 12, 16];
+      for (var i = 0; i < steps.length; i++) {
+        this.note(base * Math.pow(2, steps[i] / 12), 0.1, 3.2, i * 0.13);
+      }
+    },
+
+    whoosh: function () {
+      if (!this.ready || this.muted) return;
+      var ac = this.ctx;
+      var dur = 1.1;
+      var buf = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.4);
+      }
+      var src = ac.createBufferSource();
+      src.buffer = buf;
+      var bp = ac.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 720;
+      bp.Q.value = 0.9;
+      var g = ac.createGain();
+      g.gain.value = 0.0001;
+      g.gain.linearRampToValueAtTime(0.1, ac.currentTime + 0.15);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.master);
+      g.connect(this.reverbIn);
+      src.start();
+    },
+
+    setMuted: function (m) {
+      this.muted = m;
+      if (this.master) {
+        this.master.gain.setTargetAtTime(m ? 0 : 0.85, this.ctx.currentTime, 0.05);
+      }
+    }
+  };
+
+  /* ------------------------------------------------------------
+     流程
+     ------------------------------------------------------------ */
+  function startGame() {
+    resetWorld();
+    G.state = 'play';
+    G.flash = 0;
+    sound.init();
+    if (sound.ctx && sound.ctx.state === 'suspended') sound.ctx.resume();
+    sound.whoosh();
+  }
+
+  function setPalette(i) {
+    if (i < 0 || i >= PALETTES.length) return;
+    G.paletteIdx = i;
+    palette = PALETTES[i];
+    buildBaked();
+    if (sound.ready) sound.note(392 * Math.pow(2, i * 3 / 12), 0.07, 1.4);
+  }
+
+  function toggleMute() {
+    G.muted = !G.muted;
+    sound.setMuted(G.muted);
+  }
+
+  function checkSector() {
+    if (G.energy < G.goal) return;
+    G.energy = 0;
+    G.sector++;
+    G.flash = 1;
+    G.toast = {
+      t: 3.4,
+      text: '星 区 点 亮',
+      sub: 'SECTOR ' + String(G.sector - 1).padStart(2, '0') + '  CLEARED'
+    };
+    sound.sectorUp();
+    spawnBurst(player.x, player.y, 1, 40, 380);
+    while (motes.length < 38) motes.push(newMote(false));
+  }
+
+  function onRingPass(r) {
+    r.passed = true;
+    r.passT = 0;
+    G.energy += 3.5;
+    G.ringsPass++;
+    G.flash = Math.max(G.flash, 0.5);
+    shocks.push({ x: r.x, y: r.y, r: r.r * 0.9, life: 1 });
+    spawnBurst(r.x, r.y, 1, 24, 340);
+    sound.ring();
+    checkSector();
+  }
+
+  function angleLerp(a, b, t) {
+    var d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    return a + d * t;
+  }
+
+  /* ------------------------------------------------------------
+     更新
+     ------------------------------------------------------------ */
+  function update(dt) {
+    G.time += dt;
+    var playing = G.state === 'play';
+    if (playing) G.playT += dt;
+
+    /* --- 输入 --- */
+    var dx = 0, dy = 0, strength = 0;
+    if (playing) {
+      if (input.aim) {
+        var px = W / 2 + (player.x - camera.x);
+        var py = H / 2 + (player.y - camera.y);
+        var ox = input.mx - px, oy = input.my - py;
+        var L = Math.sqrt(ox * ox + oy * oy);
+        if (L > 6) {
+          dx = ox / L; dy = oy / L;
+          strength = clamp((L - 12) / 90, 0.18, 1);
+        }
+      }
+      var kx = (input.kRight ? 1 : 0) - (input.kLeft ? 1 : 0);
+      var ky = (input.kDown ? 1 : 0) - (input.kUp ? 1 : 0);
+      if (kx !== 0 || ky !== 0) {
+        var kl = Math.sqrt(kx * kx + ky * ky);
+        dx = kx / kl; dy = ky / kl; strength = 1;
+      }
+    }
+
+    /* --- 物理：推进 + 惯性滑行 --- */
+    player.thrust = lerp(player.thrust, playing ? strength : 0.1, 1 - Math.exp(-8 * dt));
+    if (playing && strength > 0.01) {
+      player.vx += dx * 980 * strength * dt;
+      player.vy += dy * 980 * strength * dt;
+    }
+    if (!playing) {
+      player.vx += Math.cos(G.time * 0.37) * 24 * dt;
+      player.vy += Math.sin(G.time * 0.29) * 24 * dt;
+    }
+    var damp = Math.exp(-(playing ? 1.35 : 0.75) * dt);
+    player.vx *= damp;
+    player.vy *= damp;
+
+    var sp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    var MAXSP = 780;
+    if (sp > MAXSP) { player.vx *= MAXSP / sp; player.vy *= MAXSP / sp; sp = MAXSP; }
+
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+
+    /* --- 摄像机（带前瞻，跟随绵软） --- */
+    var ck = 1 - Math.exp(-4.5 * dt);
+    camera.x = lerp(camera.x, player.x + player.vx * 0.22, ck);
+    camera.y = lerp(camera.y, player.y + player.vy * 0.22, ck);
+
+    if (sp > 24) {
+      var tgt = Math.atan2(player.vy, player.vx) + Math.PI / 2;
+      player.angle = angleLerp(player.angle, tgt, 1 - Math.exp(-8 * dt));
+    }
+
+    /* --- 尾迹 --- */
+    player.trail.push({ x: player.x, y: player.y });
+    if (player.trail.length > 44) player.trail.shift();
+
+    /* --- 星尘 --- */
+    for (var i = 0; i < motes.length; i++) {
+      var m = motes[i];
+      var mrr = recycleR();
+      if (dist2(m.x, m.y, camera.x, camera.y) > mrr * mrr) motes[i] = newMote(false);
+    }
+
+    /* --- 星环 --- */
+    for (var j = 0; j < rings.length; j++) {
+      var r = rings[j];
+      r.rot += r.spin * dt;
+      if (r.passed) {
+        r.passT += dt;
+        if (r.passT > 1.35) { rings[j] = newRing(false); continue; }
+      } else {
+        var rd = Math.sqrt(dist2(player.x, player.y, r.x, r.y));
+        if (playing && rd < r.r * 0.86) onRingPass(r);
+      }
+      var rrr = recycleR();
+      if (dist2(r.x, r.y, camera.x, camera.y) > rrr * rrr) rings[j] = newRing(false);
+    }
+
+    /* --- 收集星尘 --- */
+    if (playing) {
+      for (var k = 0; k < motes.length; k++) {
+        var mm = motes[k];
+        var my = mm.y + Math.sin(G.time * mm.spd + mm.phase) * mm.bob;
+        var d2 = dist2(player.x, player.y, mm.x, my);
+        var rr2 = mm.r + 30;
+        if (d2 < rr2 * rr2) {
+          spawnBurst(mm.x, my, mm.tone, 14, 220);
+          G.energy += 1;
+          G.collected++;
+          sound.collect(G.collected);
+          motes[k] = newMote(false);
+          checkSector();
+        }
+      }
+    }
+
+    /* --- 粒子 --- */
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.life -= dt;
+      if (pt.life <= 0) { particles.splice(p, 1); continue; }
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+      var pd = Math.exp(-2.2 * dt);
+      pt.vx *= pd;
+      pt.vy *= pd;
+    }
+
+    /* --- 速度线漂移 --- */
+    var vsp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    if (vsp > 1) {
+      var ux0 = player.vx / vsp, uy0 = player.vy / vsp;
+      for (var si = 0; si < streaks.length; si++) {
+        var st = streaks[si];
+        st.x -= ux0 * vsp * 0.55 * st.z * dt;
+        st.y -= uy0 * vsp * 0.55 * st.z * dt;
+        if (st.x < -80) st.x += W + 160; else if (st.x > W + 80) st.x -= W + 160;
+        if (st.y < -80) st.y += H + 160; else if (st.y > H + 80) st.y -= H + 160;
+      }
+    }
+
+    /* --- 冲击波 --- */
+    for (var sh = shocks.length - 1; sh >= 0; sh--) {
+      var sk = shocks[sh];
+      sk.life -= dt * 1.25;
+      sk.r += dt * 300;
+      if (sk.life <= 0) shocks.splice(sh, 1);
+    }
+
+    /* --- 其它计时 --- */
+    G.flash = Math.max(0, G.flash - dt * 1.8);
+    if (G.toast) {
+      G.toast.t -= dt;
+      if (G.toast.t <= 0) G.toast = null;
+    }
+
+    /* --- 星云回收 --- */
+    for (var n = 0; n < nebulas.length; n++) {
+      var nb = nebulas[n];
+      if (dist2(nb.x, nb.y, camera.x, camera.y) > 4200 * 4200) nebulas[n] = newNebula(false);
+    }
+  }
+
+  /* ------------------------------------------------------------
+     绘制：背景
+     ------------------------------------------------------------ */
+  function drawBackground() {
+    var ox = clamp(-player.vx * 0.03, -70, 70);
+    var oy = clamp(-player.vy * 0.03, -70, 70);
+    ctx.drawImage(bgBaked, -80 + ox, -80 + oy);
+  }
+
+  function drawNebula() {
+    var lit = clamp(G.energy / G.goal, 0, 1);
+    var cw = nebCanvas.width, ch = nebCanvas.height;
+    nebCtx.setTransform(1, 0, 0, 1, 0, 0);
+    nebCtx.clearRect(0, 0, cw, ch);
+    nebCtx.setTransform(NEB_SCALE, 0, 0, NEB_SCALE, 0, 0);
+    nebCtx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < nebulas.length; i++) {
+      var n = nebulas[i];
+      var sx = n.x - camera.x + W / 2;
+      var sy = n.y - camera.y + H / 2;
+      if (sx < -n.r || sx > W + n.r || sy < -n.r || sy > H + n.r) continue;
+      var breathe = 0.78 + 0.22 * Math.sin(G.time * n.drift + n.phase);
+      nebCtx.globalAlpha = clamp(n.a * breathe * (0.9 + 0.35 * lit), 0, 0.5);
+      nebCtx.drawImage(nebSprite(n.ci), sx - n.r, sy - n.r, n.r * 2, n.r * 2);
+    }
+    nebCtx.globalAlpha = 1;
+    nebCtx.globalCompositeOperation = 'source-over';
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(nebCanvas, 0, 0, cw / NEB_SCALE, ch / NEB_SCALE);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawStars() {
+    for (var l = 0; l < starLayers.length; l++) {
+      var L = starLayers[l];
+      var tileW = W + 160, tileH = H + 160;
+      var ox = -camera.x * L.par;
+      var oy = -camera.y * L.par;
+      ctx.fillStyle = palette.star;
+      for (var i = 0; i < L.stars.length; i++) {
+        var s = L.stars[i];
+        var x = ((s.x * tileW + ox) % tileW + tileW) % tileW - 80;
+        var y = ((s.y * tileH + oy) % tileH + tileH) % tileH - 80;
+        var tw = 0.62 + 0.38 * Math.sin(G.time * L.speed + s.p);
+        ctx.globalAlpha = L.alpha * s.a * tw;
+        ctx.fillRect(x, y, L.size, L.size);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSpeedLines() {
+    var sp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    var k = clamp((sp - 220) / 520, 0, 1);
+    if (k <= 0.02) return;
+    var ux = player.vx / sp, uy = player.vy / sp;
+    var len = 10 + k * 58;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba(palette.star, 0.05 + k * 0.13);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var i = 0; i < streaks.length; i++) {
+      var s = streaks[i];
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(s.x - ux * len * s.z, s.y - uy * len * s.z);
+    }
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ------------------------------------------------------------
+     绘制：世界
+     ------------------------------------------------------------ */
+  function drawRings() {
+    var p = palette;
+    for (var i = 0; i < rings.length; i++) {
+      var r = rings[i];
+      var sx = r.x - camera.x + W / 2;
+      var sy = r.y - camera.y + H / 2;
+      if (sx < -r.r - 90 || sx > W + r.r + 90 || sy < -r.r - 90 || sy > H + r.r + 90) continue;
+
+      var fade = (r.passed ? clamp(1 - r.passT / 1.35, 0, 1) : 1) * clamp((G.time - r.born) / 0.8, 0, 1);
+      if (fade <= 0.01) continue;
+      var pulse = 1 + Math.sin(G.time * 1.3 + r.phase) * 0.015;
+      var R = r.r * pulse;
+
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.rotate(r.rot);
+      ctx.globalCompositeOperation = 'lighter';
+
+      ctx.globalAlpha = 0.075 * fade;
+      ctx.drawImage(glowSprite(p.glow, 128), -R, -R, R * 2, R * 2);
+
+      ctx.globalAlpha = 0.10 * fade;
+      ctx.strokeStyle = p.glow;
+      ctx.lineWidth = 22;
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.stroke();
+
+      ctx.globalAlpha = 0.26 * fade;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.95 * fade;
+      ctx.strokeStyle = p.edge;
+      ctx.lineWidth = 1.6;
+      for (var k = 0; k < 3; k++) {
+        var a0 = k * TAU / 3 + G.time * 0.35;
+        ctx.beginPath(); ctx.arc(0, 0, R, a0, a0 + 0.72); ctx.stroke();
+      }
+
+      ctx.globalAlpha = 0.16 * fade;
+      ctx.strokeStyle = p.accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.76, 0, TAU); ctx.stroke();
+
+      // 轨道光点
+      for (var s2 = 0; s2 < 3; s2++) {
+        var ang = G.time * 0.55 + s2 * TAU / 3;
+        var px = Math.cos(ang) * R, py = Math.sin(ang) * R;
+        var bs = 11 + Math.sin(G.time * 2.4 + s2 * 2) * 3;
+        ctx.globalAlpha = (0.5 + 0.5 * Math.sin(G.time * 2.2 + s2 * 2.1)) * fade;
+        ctx.drawImage(glowSprite(p.accent, 32), px - bs / 2, py - bs / 2, bs, bs);
+      }
+
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawMotes() {
+    var p = palette;
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < motes.length; i++) {
+      var m = motes[i];
+      var wy = m.y + Math.sin(G.time * m.spd + m.phase) * m.bob;
+      var sx = m.x - camera.x + W / 2;
+      var sy = wy - camera.y + H / 2;
+      if (sx < -70 || sx > W + 70 || sy < -70 || sy > H + 70) continue;
+
+      var col = m.tone === 0 ? p.glow : (m.tone === 1 ? p.accent : p.core);
+      var pr = m.r * (7.5 + Math.sin(G.time * 2.6 + m.phase) * 1.1);
+      var fa = clamp((G.time - m.born) / 0.7, 0, 1);
+      var tw = 0.62 + 0.38 * Math.sin(G.time * 3.1 + m.phase);
+
+      ctx.globalAlpha = 0.62 * fa * tw;
+      ctx.drawImage(glowSprite(col, 64), sx - pr, sy - pr, pr * 2, pr * 2);
+
+      ctx.globalAlpha = 0.95 * fa;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, m.r * 0.8, 0, TAU); ctx.fill();
+
+      ctx.globalAlpha = (0.5 + 0.4 * tw) * fa;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.moveTo(sx - m.r * 4.6, sy); ctx.lineTo(sx + m.r * 4.6, sy);
+      ctx.moveTo(sx, sy - m.r * 4.6); ctx.lineTo(sx, sy + m.r * 4.6);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawShocks() {
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < shocks.length; i++) {
+      var sk = shocks[i];
+      var a = clamp(sk.life, 0, 1);
+      ctx.globalAlpha = a * 0.45;
+      ctx.strokeStyle = palette.edge;
+      ctx.lineWidth = 1 + a * 3;
+      ctx.beginPath();
+      ctx.arc(sk.x, sk.y, sk.r, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = a * 0.12;
+      ctx.lineWidth = 10 * a;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawParticles() {
+    var p = palette;
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < particles.length; i++) {
+      var pt = particles[i];
+      var a = clamp(pt.life / pt.max, 0, 1);
+      var col = pt.tone === 0 ? p.glow : (pt.tone === 1 ? p.accent : p.core);
+      var s = pt.size * (1.4 + a * 2.4);
+      ctx.globalAlpha = a * 0.85;
+      ctx.drawImage(glowSprite(col, 64), pt.x - s, pt.y - s, s * 2, s * 2);
+      ctx.globalAlpha = a * 0.9;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(pt.x - 0.8, pt.y - 0.8, 1.6, 1.6);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawTrail() {
+    var tr = player.trail, n = tr.length;
+    if (n < 4) return;
+    var left = [], right = [];
+    var i, dx, dy, l, nx, ny, w;
+    for (i = 0; i < n; i++) {
+      var p0 = tr[i > 0 ? i - 1 : 0];
+      var p1 = tr[i < n - 1 ? i + 1 : n - 1];
+      dx = p1.x - p0.x; dy = p1.y - p0.y;
+      l = Math.sqrt(dx * dx + dy * dy) || 1;
+      nx = -dy / l; ny = dx / l;
+      var a = i / (n - 1);
+      w = 0.4 + Math.pow(a, 1.35) * 7.5;
+      left.push({ x: tr[i].x + nx * w, y: tr[i].y + ny * w });
+      right.push({ x: tr[i].x - nx * w, y: tr[i].y - ny * w });
+    }
+
+    var head = tr[n - 1], tail = tr[0];
+    var g = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+    g.addColorStop(0, rgba(palette.glow, 0.55));
+    g.addColorStop(0.35, rgba(palette.glow, 0.2));
+    g.addColorStop(1, rgba(palette.glow, 0));
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(left[0].x, left[0].y);
+    for (i = 1; i < n; i++) ctx.lineTo(left[i].x, left[i].y);
+    for (i = n - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 内层亮芯
+    var g2 = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+    g2.addColorStop(0, rgba(palette.core, 0.85));
+    g2.addColorStop(0.3, rgba(palette.accent, 0.28));
+    g2.addColorStop(1, rgba(palette.accent, 0));
+    ctx.strokeStyle = g2;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tr[0].x, tr[0].y);
+    for (i = 1; i < n; i++) ctx.lineTo(tr[i].x, tr[i].y);
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function hullPath() {
+    ctx.beginPath();
+    ctx.moveTo(0, -24);
+    ctx.lineTo(6, -6);
+    ctx.lineTo(22, 12);
+    ctx.lineTo(7, 7);
+    ctx.lineTo(5, 14);
+    ctx.lineTo(0, 11);
+    ctx.lineTo(-5, 14);
+    ctx.lineTo(-7, 7);
+    ctx.lineTo(-22, 12);
+    ctx.lineTo(-6, -6);
+    ctx.closePath();
+  }
+
+  // 以当前变换原点为船体中心绘制（船头朝 -y）
+  function renderShip(thrOverride) {
+    var p = palette;
+    var thr = (thrOverride === undefined) ? player.thrust : thrOverride;
+
+    // 尾焰
+    ctx.globalCompositeOperation = 'lighter';
+    var flame = 22 + thr * 52 + Math.sin(G.time * 24) * 4 * thr;
+    var fg = ctx.createLinearGradient(0, 12, 0, 12 + flame);
+    fg.addColorStop(0, rgba(p.core, 0.75 * thr + 0.12));
+    fg.addColorStop(0.4, rgba(p.glow, 0.45 * thr + 0.05));
+    fg.addColorStop(1, rgba(p.glow, 0));
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.moveTo(-6.5, 12);
+    ctx.lineTo(0, 12 + flame);
+    ctx.lineTo(6.5, 12);
+    ctx.closePath();
+    ctx.fill();
+
+    // 外光晕
+    var aura = 128 + Math.sin(G.time * 2.1) * 8;
+    ctx.globalAlpha = 0.28 + thr * 0.2;
+    ctx.drawImage(glowSprite(p.glow, 128), -aura / 2, -aura / 2, aura, aura);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 机身
+    var hull = ctx.createLinearGradient(0, -24, 0, 15);
+    hull.addColorStop(0, '#ffffff');
+    hull.addColorStop(0.14, p.hull2);
+    hull.addColorStop(0.46, rgba(p.hull2, 0.42));
+    hull.addColorStop(0.72, p.hull1);
+    hull.addColorStop(1, p.hull1);
+    ctx.fillStyle = hull;
+    hullPath();
+    ctx.fill();
+
+    // 内嵌装甲板
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(3.2, -3);
+    ctx.lineTo(0, 9.5);
+    ctx.lineTo(-3.2, -3);
+    ctx.closePath();
+    ctx.fillStyle = rgba(p.hull2, 0.34);
+    ctx.fill();
+
+    // 边缘描边（发光）
+    ctx.strokeStyle = rgba(p.edge, 0.95);
+    ctx.lineWidth = 1.7;
+    hullPath();
+    ctx.stroke();
+
+    // 高光脊线
+    ctx.beginPath();
+    ctx.moveTo(0, -21);
+    ctx.lineTo(0, 7);
+    ctx.strokeStyle = rgba('#ffffff', 0.5);
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+
+    // 引擎口
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.7 + thr * 0.3;
+    ctx.fillStyle = rgba(p.core, 0.9);
+    ctx.beginPath();
+    ctx.ellipse(0, 11, 3.2, 1.8, 0, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // 翼尖灯
+    var wl = 14 + Math.sin(G.time * 5) * 3;
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(glowSprite(p.accent, 32), -22 - wl / 2, 12 - wl / 2, wl, wl);
+    ctx.drawImage(glowSprite(p.accent, 32), 22 - wl / 2, 12 - wl / 2, wl, wl);
+
+    // 能量核
+    var core = 24 + Math.sin(G.time * 3.4) * 4;
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(glowSprite(p.core, 64), -core / 2, -5 - core / 2, core, core);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = p.core;
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 3.2, 5.2, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawPlayerWorld() {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    ctx.scale(1.18, 1.18);
+    renderShip();
+    ctx.restore();
+  }
+
+  // 标题页的展示用飞船（屏幕空间）
+  function drawHeroProbe() {
+    ctx.save();
+    ctx.translate(W / 2, H * 0.405);
+    ctx.rotate(Math.sin(G.time * 0.55) * 0.16);
+    var s = Math.min(W, H) / 900 * 1.7 + 0.5;
+    ctx.scale(s, s);
+    renderShip(0.16);
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------------------
+     绘制：屏幕层
+     ------------------------------------------------------------ */
+  function drawFlash() {
+    if (G.flash <= 0.002) return;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rgba(palette.accent, G.flash * 0.11);
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawVignette() {
+    ctx.drawImage(vigBaked, 0, 0, W, H);
+  }
+
+    function rr(x, y, w, h, r) {
+    if (w < 0) w = 0;
+    var rad = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+  }
+
+  function spacedText(str, x, y, spacing, align) {
+    var chars = String(str).split('');
+    var widths = [];
+    var total = 0, i;
+    for (i = 0; i < chars.length; i++) {
+      widths.push(ctx.measureText(chars[i]).width);
+      total += widths[i];
+    }
+    total += spacing * (chars.length - 1);
+    var cx = align === 'center' ? x - total / 2 : x;
+    var prev = ctx.textAlign;
+    ctx.textAlign = 'left';
+    for (i = 0; i < chars.length; i++) {
+      ctx.fillText(chars[i], cx, y);
+      cx += widths[i] + spacing;
+    }
+    ctx.textAlign = prev;
+    return total;
+  }
+
+  var FONT_CN = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  var FONT_EN = '"Avenir Next", "Helvetica Neue", Arial, sans-serif';
+
+  function drawHUD() {
+    var p = palette;
+    var pad = 30;
+    ctx.textBaseline = 'alphabetic';
+
+    // --- 左侧：星区 + 进度
+    ctx.textAlign = 'left';
+    ctx.font = '600 10px ' + FONT_EN;
+    ctx.fillStyle = rgba(p.accent, 0.72);
+    spacedText('SECTOR', pad, pad + 10, 2.6, 'left');
+
+    ctx.font = '700 28px ' + FONT_EN;
+    ctx.fillStyle = '#eef8ff';
+    ctx.fillText(String(G.sector).padStart(2, '0'), pad, pad + 38);
+
+    var bw = Math.min(250, W * 0.26), bh = 3;
+    var bx = pad, by = pad + 50;
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    rr(bx, by, bw, bh, 2); ctx.fill();
+
+    var pr = clamp(G.energy / G.goal, 0, 1);
+    if (pr > 0.001) {
+      var g = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+      g.addColorStop(0, rgba(p.glow, 0.7));
+      g.addColorStop(1, p.edge);
+      ctx.fillStyle = g;
+      rr(bx, by, Math.max(bw * pr, 3), bh, 2); ctx.fill();
+    }
+    ctx.font = '500 10px ' + FONT_CN;
+    ctx.fillStyle = 'rgba(220,240,255,0.42)';
+    ctx.fillText('星域点亮 ' + Math.round(pr * 100) + '%', bx, by + 20);
+
+    // --- 右侧：星尘计数
+    var rx = W - pad - 44;
+    ctx.textAlign = 'right';
+    ctx.font = '700 22px ' + FONT_EN;
+    ctx.fillStyle = '#eef8ff';
+    ctx.fillText(String(G.collected), rx, pad + 26);
+    ctx.font = '500 10px ' + FONT_CN;
+    ctx.fillStyle = rgba(p.accent, 0.6);
+    ctx.fillText('星尘', rx, pad + 44);
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(glowSprite(p.glow, 64), rx + 12, pad + 4, 34, 34);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // --- 右下：静音
+    muteRect = { x: W - pad - 34, y: H - pad - 34, w: 34, h: 34 };
+    drawMute();
+
+    // --- 底部提示（自动淡出）
+    var hint = G.playT < 8 ? clamp(1 - (G.playT - 4) / 4, 0, 1) : 0;
+    if (hint > 0.01) {
+      ctx.globalAlpha = hint * 0.8;
+      ctx.textAlign = 'center';
+      ctx.font = '500 12px ' + FONT_CN;
+      ctx.fillStyle = 'rgba(215,238,255,0.92)';
+      ctx.fillText('按住鼠标朝光标推进 · 松手惯性滑行 · WASD / 方向键同样可用', W / 2, H - 42);
+      ctx.globalAlpha = 1;
+    }
+
+    // --- 星区点亮提示
+    if (G.toast) {
+      var t = G.toast.t;
+      var al = clamp(t / 1.1, 0, 1) * clamp((3.4 - t) * 4, 0, 1);
+      ctx.globalAlpha = al;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = p.glow;
+      ctx.shadowBlur = 26;
+      ctx.font = '700 30px ' + FONT_CN;
+      ctx.fillStyle = '#f2ffff';
+      ctx.fillText(G.toast.text, W / 2, H * 0.3);
+      ctx.shadowBlur = 0;
+      ctx.font = '500 11px ' + FONT_EN;
+      ctx.fillStyle = rgba(p.accent, 0.8);
+      spacedText(G.toast.sub, W / 2, H * 0.3 + 34, 3, 'center');
+      ctx.globalAlpha = 1;
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+
+  function drawMute() {
+    var mx = muteRect.x + 17, my = muteRect.y + 17;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(mx, my, 16, 0, TAU); ctx.stroke();
+
+    ctx.fillStyle = G.muted ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)';
+    ctx.beginPath();
+    ctx.moveTo(mx - 6.5, my - 3);
+    ctx.lineTo(mx - 3, my - 3);
+    ctx.lineTo(mx + 0.5, my - 7);
+    ctx.lineTo(mx + 0.5, my + 7);
+    ctx.lineTo(mx - 3, my + 3);
+    ctx.lineTo(mx - 6.5, my + 3);
+    ctx.closePath();
+    ctx.fill();
+
+    if (!G.muted) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath(); ctx.arc(mx + 1, my, 4.2, -0.9, 0.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(mx + 1, my, 8.4, -0.9, 0.9); ctx.stroke();
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.moveTo(mx + 3.5, my - 4.5);
+      ctx.lineTo(mx + 9, my + 4.5);
+      ctx.stroke();
+    }
+  }
+
+  /* ------------------------------------------------------------
+     绘制：标题 / 暂停
+     ------------------------------------------------------------ */
+  function layoutTitle() {
+    var cw = 196, ch = 96, gap = 18;
+    var totalW = cw * 3 + gap * 2;
+    var x0 = (W - totalW) / 2;
+    var y0 = H * 0.55;
+    var cards = [];
+    for (var i = 0; i < 3; i++) {
+      cards.push({ x: x0 + i * (cw + gap), y: y0, w: cw, h: ch, i: i });
+    }
+    return {
+      cards: cards,
+      btn: { x: W / 2 - 130, y: y0 + ch + 34, w: 260, h: 54 }
+    };
+  }
+
+  function drawTitle() {
+    var L = layoutTitle();
+    var p = palette;
+
+    ctx.fillStyle = 'rgba(2,4,10,0.42)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 标题
+    var ty = Math.min(H * 0.205, 210);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = p.glow;
+    ctx.shadowBlur = 46;
+    ctx.font = '700 ' + Math.round(Math.min(W * 0.062, 68)) + 'px ' + FONT_CN;
+    ctx.fillStyle = '#f4ffff';
+    ctx.fillText('星 尘 港 湾', W / 2, ty);
+    ctx.shadowBlur = 0;
+
+    ctx.font = '500 12px ' + FONT_EN;
+    ctx.fillStyle = rgba(p.accent, 0.75);
+    spacedText('STARDUST  HARBOR', W / 2, ty + 52, 6.5, 'center');
+
+    ctx.font = '400 12px ' + FONT_CN;
+    ctx.fillStyle = 'rgba(210,235,250,0.5)';
+    ctx.fillText('滑翔 · 穿环 · 收集星尘 —— 没有失败，只有慢慢亮起的星域', W / 2, ty + 86);
+
+    // 配色卡片
+    for (var i = 0; i < L.cards.length; i++) {
+      var c = L.cards[i];
+      var col = PALETTES[c.i];
+      var sel = c.i === G.paletteIdx;
+
+      rr(c.x, c.y, c.w, c.h, 14);
+      var cg = ctx.createLinearGradient(c.x, c.y, c.x, c.y + c.h);
+      cg.addColorStop(0, rgba(col.hull1, 0.95));
+      cg.addColorStop(1, rgba(col.glow, 0.22));
+      ctx.fillStyle = cg;
+      ctx.fill();
+      ctx.strokeStyle = sel ? col.edge : 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = sel ? 1.8 : 1;
+      ctx.stroke();
+
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(glowSprite(col.glow, 64), c.x + 20, c.y + c.h / 2 - 20, 42, 42);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = '600 15px ' + FONT_CN;
+      ctx.fillStyle = '#eaf6ff';
+      ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 - 12);
+
+      ctx.font = '500 8.5px ' + FONT_EN;
+      ctx.fillStyle = rgba(col.accent, 0.7);
+      spacedText(col.en, c.x + 59, c.y + c.h / 2 + 10, 1.8, 'left');
+
+      if (sel) {
+        ctx.fillStyle = col.core;
+        ctx.beginPath();
+        ctx.arc(c.x + c.w - 18, c.y + 16, 3, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    // 开始按钮
+    var b = L.btn;
+    var pulse = 0.55 + 0.45 * Math.sin(G.time * 2.2);
+    rr(b.x, b.y, b.w, b.h, 27);
+    var bgd = ctx.createLinearGradient(b.x, b.y, b.x + b.w, b.y);
+    bgd.addColorStop(0, rgba(p.glow, 0.16 + 0.1 * pulse));
+    bgd.addColorStop(1, rgba(p.accent, 0.10 + 0.08 * pulse));
+    ctx.fillStyle = bgd;
+    ctx.fill();
+    ctx.strokeStyle = rgba(p.edge, 0.35 + 0.4 * pulse);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '600 16px ' + FONT_CN;
+    ctx.fillStyle = '#f0ffff';
+    ctx.fillText('开 始 探 索', W / 2, b.y + b.h / 2 + 1);
+
+    ctx.font = '500 10px ' + FONT_CN;
+    ctx.fillStyle = 'rgba(200,228,248,0.45)';
+    ctx.fillText('点击卡片切换配色 · 也可按 1 / 2 / 3', W / 2, b.y + b.h + 26);
+
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawPause() {
+    ctx.fillStyle = 'rgba(2,4,10,0.66)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = palette.glow;
+    ctx.shadowBlur = 26;
+    ctx.font = '700 34px ' + FONT_CN;
+    ctx.fillStyle = '#eefcff';
+    ctx.fillText('已 暂 停', W / 2, H / 2 - 18);
+    ctx.shadowBlur = 0;
+    ctx.font = '500 12px ' + FONT_CN;
+    ctx.fillStyle = 'rgba(205,232,250,0.65)';
+    ctx.fillText('按 P 或点击任意处继续 · R 回到标题 · M 静音 · 1/2/3 切换配色', W / 2, H / 2 + 38);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /* ------------------------------------------------------------
+     主绘制
+     ------------------------------------------------------------ */
+  function draw() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    drawBackground();
+    drawNebula();
+    drawStars();
+    if (G.state === 'play') drawSpeedLines();
+
+    ctx.save();
+    ctx.translate(W / 2 - camera.x, H / 2 - camera.y);
+    drawRings();
+    drawShocks();
+    drawMotes();
+    if (G.state !== 'title') {
+      drawTrail();
+      drawPlayerWorld();
+    }
+    drawParticles();
+    ctx.restore();
+
+    drawFlash();
+    drawVignette();
+
+    if (G.state === 'play') drawHUD();
+    else if (G.state === 'title') { drawTitle(); drawHeroProbe(); }
+    else if (G.state === 'paused') drawPause();
+  }
+
+  /* ------------------------------------------------------------
+     输入
+     ------------------------------------------------------------ */
+  function pointerPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  function inside(pt, r) {
+    return pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h;
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    var pt = pointerPos(e);
+    input.mx = pt.x;
+    input.my = pt.y;
+
+    if (G.state === 'title') {
+      sound.init();
+      if (sound.ctx && sound.ctx.state === 'suspended') sound.ctx.resume();
+      var L = layoutTitle();
+      for (var i = 0; i < L.cards.length; i++) {
+        if (inside(pt, L.cards[i])) { setPalette(L.cards[i].i); return; }
+      }
+      startGame();
+      return;
+    }
+    if (G.state === 'paused') {
+      G.state = 'play';
+      return;
+    }
+    if (inside(pt, muteRect)) { toggleMute(); return; }
+    input.aim = true;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    var pt = pointerPos(e);
+    input.mx = pt.x;
+    input.my = pt.y;
+  });
+
+  function releasePointer() { input.aim = false; }
+  canvas.addEventListener('pointerup', releasePointer);
+  canvas.addEventListener('pointercancel', releasePointer);
+  canvas.addEventListener('pointerleave', releasePointer);
+
+  window.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (k === ' ' || k.indexOf('arrow') === 0) e.preventDefault();
+
+    if (k === 'arrowleft' || k === 'a') input.kLeft = true;
+    if (k === 'arrowright' || k === 'd') input.kRight = true;
+    if (k === 'arrowup' || k === 'w') input.kUp = true;
+    if (k === 'arrowdown' || k === 's') input.kDown = true;
+
+    if (k === ' ') {
+      if (G.state === 'title') { sound.init(); startGame(); }
+      else if (G.state === 'paused') G.state = 'play';
+    }
+    if (k === 'p' || k === 'escape') {
+      if (G.state === 'play') G.state = 'paused';
+      else if (G.state === 'paused') G.state = 'play';
+    }
+    if (k === 'm') toggleMute();
+    if (k === 'r' && (G.state === 'play' || G.state === 'paused')) {
+      G.state = 'title';
+      resetWorld();
+    }
+    if (k === '1' || k === '2' || k === '3') setPalette(parseInt(k, 10) - 1);
+  });
+
+  window.addEventListener('keyup', function (e) {
+    var k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a') input.kLeft = false;
+    if (k === 'arrowright' || k === 'd') input.kRight = false;
+    if (k === 'arrowup' || k === 'w') input.kUp = false;
+    if (k === 'arrowdown' || k === 's') input.kDown = false;
+  });
+
+  window.addEventListener('blur', function () {
+    input.kLeft = input.kRight = input.kUp = input.kDown = false;
+    input.aim = false;
+    if (G.state === 'play') G.state = 'paused';
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && G.state === 'play') G.state = 'paused';
+  });
+
+  window.addEventListener('resize', resize);
+  var rafId = 0;
+
+  /* ------------------------------------------------------------
+     启动
+     ------------------------------------------------------------ */
+  resize();
+  buildStarfield();
+  initNebulas();
+
+  var params = new URLSearchParams(location.search);
+  if (params.get('palette')) {
+    var pi = parseInt(params.get('palette'), 10) - 1;
+    if (pi >= 0 && pi < PALETTES.length) { G.paletteIdx = pi; palette = PALETTES[pi]; }
+  }
+  resetWorld();
+  if (params.has('autostart')) G.state = 'play';
+
+  var last = 0;
+  function frame(now) {
+    var dt = last ? (now - last) / 1000 : 0.016;
+    last = now;
+    if (!(dt > 0)) dt = 0.016;
+    if (dt > 1 / 30) dt = 1 / 30;
+
+    if (G.state !== 'paused') update(dt);
+    draw();
+    rafId = requestAnimationFrame(frame);
+  }
+  rafId = requestAnimationFrame(frame);
+
+  // 开发/自动化测试钩子（不影响正常玩法）
+  window.__stardust = {
+    G: G, player: player, input: input, sound: sound, camera: camera,
+    motes: motes, rings: rings, particles: particles, shocks: shocks,
+    startGame: startGame, setPalette: setPalette, checkSector: checkSector
+  };
+})();
+</script>
+</body>
+</html>
