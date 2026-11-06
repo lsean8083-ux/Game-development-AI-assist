@@ -1,11 +1,10 @@
-# Stardust Harbor · 星尘港湾
+# Stardust Harbor
 
 **English** | [中文](README.zh-CN.md)
 
-A calm 2D side-scrolling space game about gliding, threading rings and gathering stardust.
-**No dependencies, no install, no network** — just double-click `index.html`.
+A 2D sci-fi relaxation game that runs in one file. **No dependencies, no install, no network** — just open `index.html`.
 
-> Glide · thread the rings · gather stardust — no failure, only sectors slowly waking to light.
+> Glide · thread rings · gather stardust · shoot down intruders — no failure, only sectors waking to light.
 
 ![Title screen](preview/04-title-en.jpg)
 
@@ -15,67 +14,100 @@ A calm 2D side-scrolling space game about gliding, threading rings and gathering
 
 | Input | Action |
 |---|---|
-| Hold left mouse and move | Thrust toward the cursor |
-| Release the mouse | Coast with gentle damping (no hard stop) |
+| Hold left mouse button | Thrust toward the cursor |
+| Release | Coast on inertia (gentle damping, no hard stop) |
 | `W A S D` / arrow keys | Keyboard thrust |
-| `1` `2` `3` | Switch palette (Aurora Cyan / Crimson Pulse / Amber Ember) |
-| `L` | Switch language (English / 中文) |
+| `1` `2` `3` | Switch theme — which also switches your weapon and your foes |
+| `L` | Switch language (中文 / English) |
 | `M` | Mute / unmute |
 | `P` / `Esc` | Pause / resume |
 | `R` | Back to title (restart) |
 | `Space` | Start from the title screen |
 
-### Goal
+**Your weapon fires automatically** — you only have to fly beautifully. Where you go, what you gather, who you shoot is left to feel and a little luck.
 
-- **Gather stardust** — each mote adds +1 light and plays an ascending note (pentatonic, so collecting runs naturally fall into a melody).
-- **Thread the rings** — fly inside the halo; each ring adds +3.5 light with a shockwave and bloom.
-- Fill the bar to **46** and the sector lights up: the counter advances and the sky keeps getting brighter. Endless, with **no losing condition**.
+### Goals
+- **Gather stardust** — +10 points each, plus an ascending note (pentatonic, so chains turn into tunes).
+- **Thread the rings** — fly into the hoop, +50 points.
+- **Shoot down intruders** — 30 / 60 / 80 points depending on the foe; kills can drop extra stardust.
+- Fill the bar to **46** to light a sector: +500 points, then the next sector begins. Endless loop, **no failure state and no health bar**.
+
+---
+
+## Three themes = three weapons + three foes
+
+Switching theme swaps your weapon, your enemies, and the colour of the whole sector.
+
+| Theme | Weapon | Feel | Foe |
+|---|---|---|---|
+| **AURORA CYAN** | **ION BURST** | Rapid bolts; the faster you fly, the faster it fires | Drifter — hex hull, tanky |
+| **CRIMSON PULSE** | **PHASE LANCE** | Charges up, then fires a piercing beam through a whole line | Prism — splits into two smaller shards |
+| **AMBER EMBER** | **BROOD CARRIER** | Never fires itself: launches escort gunships that orbit and engage | Swarm — fast and numerous |
+
+![Aurora Cyan](preview/02-play-cyan.jpg)
+![Crimson Pulse](preview/05-play-pink.jpg)
+
+### Higher score → stronger weapon
+
+Crossing a score threshold upgrades the weapon automatically. The HUD shows five level pips, and a "LV.n + weapon name" banner flashes on each upgrade.
+
+| Level | Score needed | Effect |
+|---|---|---|
+| LV.1 | 0 | Base form |
+| LV.2 | 600 | Faster fire rate / charge |
+| LV.3 | 1,600 | ION BURST twin shot; +1 beam damage; +1 drone |
+| LV.4 | 3,200 | More damage and rate again |
+| LV.5 | 5,600 | ION BURST triple shot; carrier runs a full wing of 6 |
+
+Enemies cannot hurt you — there is no health and no game over. They approach, drift, and get shot down.
 
 ---
 
 ## Design notes
 
-**Feel first**
-- No health, no timer, no death. The only "penalty" is that you keep drifting after you let go.
-- Inertial handling: 980 px/s² thrust, 1.35/s damping, 780 px/s cap — like sliding on ice.
-- Generous hitboxes (motes +30 px, rings at 86% of the inner radius) so casual passes still feel rewarded.
+**Feel first (it is a relaxation game)**
+- No health, no timer, no death; the only "penalty" is drifting while you coast.
+- Inertia tuning: 980 px/s² acceleration, 1.35/s damping, 780 px/s cap — like gliding on ice.
+- Generous pickup radii (stardust +30px, ring inner 86%) so a casual pass still rewards you.
+- Auto-fire with predictive aim: enemies pop even if you never aim.
 
-**Art — 100% procedural, no image assets**
-- Probe: layered gradient hull, inset armour plates, glowing core, engine flame, wingtip lights and a ribbon trail; three palettes switch live.
-- Background: pre-baked base layer + half-resolution nebula composited once at 4× upscale + three parallax star layers + speed lines.
-- Feedback: particle bursts, ring shockwaves, full-screen bloom, sector-lit toast.
+**Art — everything generated at runtime, zero assets**
+- The probe is layered: gradient hull, inset armour plates, glowing core, engine flame, wingtip lights, ribbon trail.
+- Each theme brings its own foe silhouette (hex / diamond / triangle) in a hue that contrasts with the palette, so friend and foe never blur together.
+- Background: a baked base image, half-resolution nebula compositing upscaled 4×, three parallax star layers, and speed lines.
+- Feedback: particle bursts, shockwaves, floating score numbers, screen bloom, sector-lit banner.
 
-**Audio — synthesized at runtime with Web Audio, no audio files**
-- Ambient bed: 55 Hz fundamental plus five overtones through a low-pass, breathing at 0.045 Hz.
-- Collect: ascending pentatonic notes, three overtones, procedural convolution reverb.
-- Ring pass: sustained major triad. Sector cleared: ascending arpeggio.
+**Audio — synthesised live with Web Audio, no files**
+- Bed: 55Hz fundamental plus five partials through a low-pass, breathing at 0.045Hz.
+- Pickups: pentatonic ascending notes with three partials into a generated convolution reverb.
+- Shots, explosions, the beam, and level-ups each get their own restrained voice.
 
 **Performance**
-- Background and vignette are pre-baked and only redrawn when the window size or palette changes.
-- Nebulas are composited on a 1/4-resolution canvas and upscaled once, which removes most of the fill cost.
-- Measured in headless Chrome on pure software rasterization at 1440×900: **59.3 fps / p50 16.7 ms** (empty-canvas baseline in the same environment: 60 fps).
-- Entities recycle at the view radius and respawn on an off-screen band with a fade-in, keeping density stable.
+- Base image and vignette are pre-baked; they only redraw on resize or palette change.
+- Nebulae composite into a quarter-resolution canvas and get upscaled once, cutting fill-rate dramatically.
+- Measured (Chrome headless, software rasteriser, 1440×900): 59.3 fps / p50 16.7 ms, against a 60 fps empty-canvas baseline in the same environment.
+- Entities recycle by view radius and respawn just off-screen with a fade-in, keeping density stable.
 
 ---
 
 ## Files
 
 ```
-index.html            # everything: HTML + CSS + JS (~1.6k lines), no external deps
-README.md             # this file (English)
+index.html            # everything: HTML + CSS + JS (~2k lines), no external dependencies
+README.md             # this file
 README.zh-CN.md       # Chinese version
 preview/              # screenshots
 ```
 
-## Debug URL parameters
+## Dev parameters (optional)
 
-| Parameter | Effect |
+| Param | Effect |
 |---|---|
 | `?autostart` | Skip the title screen |
-| `?palette=2` | Start with the second palette |
+| `?palette=2` | Start with theme 2 (1 / 2 / 3) |
 | `?lang=en` | Start in English (`zh` for Chinese) |
 
-The page also exposes `window.__stardust` (state, player, input, audio, entity arrays, `startGame()`, `setLang()`, …) for automated testing only; it does not affect normal play.
+The page also exposes `window.__stardust` (state, player, input, audio, enemies, bullets, drones, `startGame()`, `setLang()`, …) for automated testing only.
 
 ## Browser support
 

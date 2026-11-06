@@ -39,6 +39,7 @@
   var PALETTES = [
     {
       id: 'aurora', name: '极光青', en: 'AURORA CYAN',
+      weapon: 'bolt', mob: 'drifter', foe: '#ff6fb5',
       hull1: '#0a2233', hull2: '#3ae6c8', edge: '#c4fff6',
       core: '#e6fffb', glow: '#2ff0d0', accent: '#7ef0ff',
       neb: ['#0d5f74', '#183d8f', '#0b7f6e'],
@@ -46,6 +47,7 @@
     },
     {
       id: 'pulse', name: '绯红脉冲', en: 'CRIMSON PULSE',
+      weapon: 'lance', mob: 'prism', foe: '#5ff0ff',
       hull1: '#2a0a1a', hull2: '#ff4f86', edge: '#ffd6e4',
       core: '#ffe4ee', glow: '#ff3d78', accent: '#ff9ac0',
       neb: ['#7a1040', '#3a1266', '#5c1240'],
@@ -53,6 +55,7 @@
     },
     {
       id: 'ember', name: '琥珀星火', en: 'AMBER EMBER',
+      weapon: 'carrier', mob: 'swarm', foe: '#8fb6ff',
       hull1: '#2b1a08', hull2: '#ffc35c', edge: '#fff0cc',
       core: '#fff6dd', glow: '#ffab3d', accent: '#ffd98a',
       neb: ['#8f4a12', '#6b1f3a', '#7a5a10'],
@@ -60,6 +63,25 @@
     }
   ];
   var palette = PALETTES[0];
+
+  /* ------------------------------------------------------------
+     武器 / 敌人 / 分数
+     ------------------------------------------------------------ */
+  // 分数阈值 → 武器等级（1..5）
+  var LEVELS = [0, 800, 2200, 4200, 7000];
+
+  var WEAPONS = {
+    bolt: { zh: '离子脉冲', en: 'ION BURST', zhDesc: '速度越快，射速越快', enDesc: 'speed feeds the fire rate' },
+    lance: { zh: '相位激光', en: 'PHASE LANCE', zhDesc: '蓄能贯穿光束', enDesc: 'charged piercing beam' },
+    carrier: { zh: '蜂群航母', en: 'BROOD CARRIER', zhDesc: '释放小战舰迎击', enDesc: 'launches escort gunships' }
+  };
+
+  // 每种主题的敌人体质
+  var MOBS = {
+    drifter: { hp: 3, r: 16, spd: 205, score: 60, r2: 0.55 },
+    prism: { hp: 4, r: 18, spd: 175, score: 80, r2: 0.5 },
+    swarm: { hp: 1, r: 10, spd: 262, score: 30, r2: 1.1 }
+  };
 
   /* ------------------------------------------------------------
      颜色工具 / 精灵缓存
@@ -135,7 +157,11 @@
     flash: 0,
     toast: null,
     muted: false,
-    paletteIdx: 0
+    paletteIdx: 0,
+    score: 0,
+    weaponLv: 1,
+    kills: 0,
+    lvT: 0
   };
 
   /* ------------------------------------------------------------
@@ -146,11 +172,12 @@
       docTitle: '星尘港湾 · Stardust Harbor',
       titleBig: '星 尘 港 湾',
       titleSmall: 'STARDUST  HARBOR',
-      tagline: '滑翔 · 穿环 · 收集星尘 —— 没有失败，只有慢慢亮起的星域',
+      tagline: '滑翔 · 穿环 · 收集星尘 · 击落入侵者 —— 没有失败，只有慢慢亮起的星域',
       start: '开 始 探 索',
-      paletteHint: '点击卡片切换配色 · 也可按 1 / 2 / 3',
+      paletteHint: '点击卡片切换配色 —— 同时更换武器与敌人 · 也可按 1 / 2 / 3',
       lit: '星域点亮',
       dust: '星尘',
+      score: '积 分',
       hint: '按住鼠标朝光标推进 · 松手惯性滑行 · WASD / 方向键同样可用',
       toast: '星 区 点 亮',
       paused: '已 暂 停',
@@ -161,11 +188,12 @@
       docTitle: 'Stardust Harbor',
       titleBig: 'STARDUST HARBOR',
       titleSmall: '星 尘 港 湾',
-      tagline: 'Glide · thread the rings · gather stardust — no failure, only sectors slowly waking to light',
+      tagline: 'Glide · thread rings · gather stardust · shoot down intruders — no failure, only sectors waking to light',
       start: 'START  EXPLORING',
-      paletteHint: 'Click a card to change palette · or press 1 / 2 / 3',
+      paletteHint: 'Click a card to change palette — and your weapon and foes · or press 1 / 2 / 3',
       lit: 'SECTOR LIT',
       dust: 'STARDUST',
+      score: 'SCORE',
       hint: 'Hold to thrust toward the cursor · release to coast · WASD / arrow keys work too',
       toast: 'SECTOR LIT',
       paused: 'P A U S E D',
@@ -203,6 +231,11 @@
   var starLayers = [];
   var streaks = [];
   var shocks = [];
+  var enemies = [];
+  var bullets = [];
+  var lasers = [];
+  var drones = [];
+  var floaters = [];
 
   // 烘焙贴图：整屏背景 / 暗角 / 半分辨率星云
   var bgBaked = document.createElement('canvas');
@@ -333,7 +366,7 @@
       // 星尘在视野圆盘内均匀重生，保证屏幕中也有东西可收
       var R = recycleR();
       var a = Math.random() * TAU;
-      var d = 120 + Math.sqrt(Math.random()) * (R * 0.95 - 120);
+      var d = 120 + Math.sqrt(Math.random()) * (R * 0.84 - 120);
       P = { x: camera.x + Math.cos(a) * d, y: camera.y + Math.sin(a) * d };
     }
     return {
@@ -365,6 +398,59 @@
     };
   }
 
+  function nearestEnemy(x, y, maxD) {
+    var best = null, bd = maxD * maxD;
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      var d = dist2(x, y, e.x, e.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  function newEnemy(kind, initial, px, py) {
+    var M = MOBS[kind] || MOBS.drifter;
+    var P;
+    if (px !== undefined) P = { x: px, y: py };
+    else if (initial) P = { x: camera.x + rand(-W * 0.75, W * 0.75), y: camera.y + rand(-H * 0.75, H * 0.75) };
+    else {
+      var R = recycleR();
+      var sa = Math.atan2(player.vy, player.vx) + rand(-1.6, 1.6);
+      var sd = rand(R * 0.42, R * 0.72);
+      P = { x: camera.x + Math.cos(sa) * sd, y: camera.y + Math.sin(sa) * sd };
+    }
+    return {
+      kind: kind,
+      x: P.x, y: P.y,
+      vx: rand(-1, 1) * M.spd * 0.45,
+      vy: rand(-1, 1) * M.spd * 0.45,
+      hp: M.hp, maxHp: M.hp,
+      r: M.r,
+      spd: M.spd,
+      score: M.score,
+      gen: 0,
+      rot: Math.random() * TAU,
+      spin: rand(-1.1, 1.1),
+      phase: Math.random() * TAU,
+      born: G.time,
+      hurt: 0,
+      pushed: 0
+    };
+  }
+
+  // 保持视野内敌人数稳定：随星区略微增加
+  function enemyTarget() {
+    return Math.min(11, 5 + Math.floor(G.sector * 0.8));
+  }
+
+  function spawnEnemyPack(kind, n, initial, x, y) {
+    for (var i = 0; i < n; i++) {
+      var e = newEnemy(kind, initial, x === undefined ? undefined : x + rand(-26, 26), y === undefined ? undefined : y + rand(-26, 26));
+      e.gen = 1;
+      enemies.push(e);
+    }
+  }
+
   function resetWorld() {
     player.x = 0; player.y = 0; player.vx = 0; player.vy = 0;
     player.angle = -Math.PI / 2; player.thrust = 0; player.trail.length = 0;
@@ -372,9 +458,13 @@
     particles.length = 0; motes.length = 0; rings.length = 0; shocks.length = 0;
     G.sector = 1; G.energy = 0; G.collected = 0; G.ringsPass = 0;
     G.flash = 0; G.toast = null; G.playT = 0;
+    G.score = 0; G.weaponLv = 1; G.kills = 0; G.lvT = 0;
+    enemies.length = 0; bullets.length = 0; lasers.length = 0;
+    drones.length = 0; floaters.length = 0;
     var i;
-    for (i = 0; i < 60; i++) motes.push(newMote(true));
+    for (i = 0; i < 46; i++) motes.push(newMote(true));
     for (i = 0; i < 8; i++) rings.push(newRing(true));
+    for (i = 0; i < 5; i++) enemies.push(newEnemy(palette.mob, true));
     initNebulas();
   }
 
@@ -558,6 +648,60 @@
       src.start();
     },
 
+    shot: function (freq, vel, dur, type) {
+      if (!this.ready || this.muted) return;
+      var ac = this.ctx, t0 = ac.currentTime;
+      var o = ac.createOscillator();
+      o.type = type || 'square';
+      o.frequency.setValueAtTime(freq, t0);
+      o.frequency.exponentialRampToValueAtTime(Math.max(60, freq * 0.5), t0 + dur);
+      var g = ac.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0008, vel), t0 + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g);
+      g.connect(this.master);
+      o.start(t0);
+      o.stop(t0 + dur + 0.03);
+    },
+
+    boom: function () {
+      if (!this.ready || this.muted) return;
+      var ac = this.ctx, t0 = ac.currentTime;
+      var dur = 0.34;
+      var buf = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3.2);
+      }
+      var src = ac.createBufferSource();
+      src.buffer = buf;
+      var lp = ac.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(1400, t0);
+      lp.frequency.exponentialRampToValueAtTime(260, t0 + dur);
+      var g = ac.createGain();
+      g.gain.value = 0.22;
+      src.connect(lp); lp.connect(g); g.connect(this.master);
+      g.connect(this.reverbIn);
+      src.start(t0);
+      src.stop(t0 + dur);
+    },
+
+    beam: function () {
+      this.shot(240, 0.06, 0.55, 'sawtooth');
+      this.note(392, 0.06, 1.4);
+      this.note(587.33, 0.03, 1.1);
+    },
+
+    levelUp: function () {
+      var base = 523.25;
+      var steps = [0, 4, 7, 12];
+      for (var i = 0; i < steps.length; i++) {
+        this.note(base * Math.pow(2, steps[i] / 12), 0.12, 2.6, i * 0.085);
+      }
+    },
+
     setMuted: function (m) {
       this.muted = m;
       if (this.master) {
@@ -582,6 +726,8 @@
     if (i < 0 || i >= PALETTES.length) return;
     G.paletteIdx = i;
     palette = PALETTES[i];
+    bullets.length = 0; lasers.length = 0; drones.length = 0;
+    weapon.fireT = 0; weapon.chargeT = 0.9; weapon.droneT = 0.6;
     buildBaked();
     if (sound.ready) sound.note(392 * Math.pow(2, i * 3 / 12), 0.07, 1.4);
   }
@@ -601,6 +747,7 @@
       sector: G.sector - 1
     };
     sound.sectorUp();
+    addScore(500);
     spawnBurst(player.x, player.y, 1, 40, 380);
     while (motes.length < 38) motes.push(newMote(false));
   }
@@ -610,6 +757,7 @@
     r.passT = 0;
     G.energy += 3.5;
     G.ringsPass++;
+    addScore(50);
     G.flash = Math.max(G.flash, 0.5);
     shocks.push({ x: r.x, y: r.y, r: r.r * 0.9, life: 1 });
     spawnBurst(r.x, r.y, 1, 24, 340);
@@ -620,6 +768,257 @@
   function angleLerp(a, b, t) {
     var d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
     return a + d * t;
+  }
+
+  /* ------------------------------------------------------------
+     战斗：分数 / 武器 / 敌人
+     ------------------------------------------------------------ */
+  var weapon = { fireT: 0, chargeT: 1.6, droneT: 0.8 };
+
+  function weaponLevelFor(sc) {
+    var lv = 1;
+    for (var i = 0; i < LEVELS.length; i++) if (sc >= LEVELS[i]) lv = i + 1;
+    return lv;
+  }
+
+  function addScore(n) {
+    G.score += n;
+    var lv = weaponLevelFor(G.score);
+    if (lv > G.weaponLv) {
+      G.weaponLv = lv;
+      G.lvT = 1.6;
+      floaters.push({
+        x: player.x, y: player.y - 52, text: 'LV.' + lv + '  ' + (isEN() ? WEAPONS[palette.weapon].en : WEAPONS[palette.weapon].zh),
+        life: 2.2, max: 2.2, tone: 0, big: true
+      });
+      spawnBurst(player.x, player.y, 0, 34, 300);
+      sound.levelUp();
+    }
+  }
+
+  function newMoteAt(x, y) {
+    return {
+      x: x, y: y, r: rand(2.4, 4.6), phase: Math.random() * TAU,
+      bob: rand(6, 20), spd: rand(0.5, 1.4),
+      tone: (Math.random() * 3) | 0, born: G.time
+    };
+  }
+
+  function damageEnemy(e, dmg) {
+    if (e.dead) return;
+    e.hp -= dmg;
+    e.hurt = 0.14;
+    if (e.hp <= 0) killEnemy(e);
+    else spawnBurst(e.x, e.y, 2, 5, 150);
+  }
+
+  function killEnemy(e) {
+    if (e.dead) return;
+    e.dead = true;
+    G.kills++;
+    addScore(e.score);
+    spawnBurst(e.x, e.y, 2, 26, 330);
+    shocks.push({ x: e.x, y: e.y, r: e.r * 0.8, life: 0.55, foe: true });
+    floaters.push({ x: e.x, y: e.y - 8, text: '+' + e.score, life: 0.95, max: 0.95, tone: 2 });
+    sound.boom();
+    if (motes.length < 60 && Math.random() < 0.45) motes.push(newMoteAt(e.x, e.y));
+    if (e.kind === 'prism' && e.gen < 2) {
+      var M = MOBS.prism;
+      for (var i = 0; i < 2; i++) {
+        var a = (i ? 1 : -1) * rand(0.6, 1.3);
+        var c = newEnemy('prism', false, e.x + Math.cos(a) * 18, e.y + Math.sin(a) * 18);
+        c.gen = 2; c.r = M.r * 0.62; c.hp = 2; c.maxHp = 2; c.score = 40;
+        c.vx = Math.cos(a) * 150; c.vy = Math.sin(a) * 150;
+        enemies.push(c);
+      }
+    }
+  }
+
+  // --- 自动开火（按主题）
+  function fireBolt() {
+    var lv = G.weaponLv;
+    var tgt = nearestEnemy(player.x, player.y, 980);
+    if (!tgt) return false;
+    var sp = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    var interval = Math.max(0.09, (0.36 - (lv - 1) * 0.03) / (1 + sp / 1500));
+    if (weapon.fireT > 0) return false;
+    weapon.fireT = interval;
+    var bl = Math.sqrt(dist2(player.x, player.y, tgt.x, tgt.y));
+    var bt = bl / 1080;
+    var ang = Math.atan2(tgt.y + tgt.vy * bt - player.y, tgt.x + tgt.vx * bt - player.x);
+    var n = lv >= 5 ? 3 : (lv >= 3 ? 2 : 1);
+    var dmg = 2 + Math.floor((lv - 1) / 2);
+    for (var i = 0; i < n; i++) {
+      var a = ang + (i - (n - 1) / 2) * 0.085;
+      bullets.push({
+        x: player.x + Math.cos(a) * 22, y: player.y + Math.sin(a) * 22,
+        vx: Math.cos(a) * 1080, vy: Math.sin(a) * 1080,
+        dmg: dmg, life: 0.9, kind: 'bolt'
+      });
+    }
+    sound.shot(1180, 0.035, 0.075, 'square');
+    return true;
+  }
+
+  function fireLance() {
+    if (weapon.chargeT > 0) return false;
+    var lv = G.weaponLv;
+    var tgt = nearestEnemy(player.x, player.y, 1180);
+    if (!tgt) return false;
+    weapon.chargeT = Math.max(0.78, 2.1 - (lv - 1) * 0.22);
+    var a = Math.atan2(tgt.y - player.y, tgt.x - player.x);
+    var w = 5 + lv * 1.9, dmg = 3 + lv, len = 1600;
+    var ux = Math.cos(a), uy = Math.sin(a);
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      if (e.dead) continue;
+      var ex = e.x - player.x, ey = e.y - player.y;
+      var proj = ex * ux + ey * uy;
+      if (proj < 0 || proj > len) continue;
+      var perp = Math.abs(ex * uy - ey * ux);
+      if (perp < e.r + w * 0.55) damageEnemy(e, dmg);
+    }
+    lasers.push({ x: player.x, y: player.y, a: a, life: 0.3, max: 0.3, w: w, len: len });
+    G.flash = Math.max(G.flash, 0.18);
+    sound.beam();
+    return true;
+  }
+
+  function spawnDrone() {
+    var a = Math.random() * TAU;
+    drones.push({
+      x: player.x + Math.cos(a) * 60, y: player.y + Math.sin(a) * 60,
+      cd: rand(0.15, 0.5), a: a, phase: Math.random() * TAU, born: G.time
+    });
+    sound.shot(520, 0.03, 0.12, 'triangle');
+  }
+
+  function updateWeapons(dt) {
+    var lv = G.weaponLv;
+    weapon.fireT -= dt;
+    weapon.chargeT -= dt;
+    weapon.droneT -= dt;
+
+    if (palette.weapon === 'bolt') {
+      fireBolt();
+    } else if (palette.weapon === 'lance') {
+      fireLance();
+    } else {
+      var maxD = 2 + Math.floor(lv * 0.9);
+      if (drones.length < maxD && weapon.droneT <= 0) {
+        weapon.droneT = 2.0;
+        spawnDrone();
+      }
+    }
+  }
+
+  function updateDrones(dt) {
+    var lv = G.weaponLv;
+    var interval = Math.max(0.38, 0.8 - (lv - 1) * 0.07);
+    for (var i = 0; i < drones.length; i++) {
+      var d = drones[i];
+      var base = G.time * 1.1 + d.phase;
+      var rad = 54 + i * 10;
+      var tx = player.x + Math.cos(base) * rad;
+      var ty = player.y + Math.sin(base) * rad;
+      var k = 1 - Math.exp(-7 * dt);
+      d.x = lerp(d.x, tx, k);
+      d.y = lerp(d.y, ty, k);
+      d.cd -= dt;
+      var tgt = nearestEnemy(d.x, d.y, 900);
+      if (tgt) {
+        var dl = Math.sqrt(dist2(d.x, d.y, tgt.x, tgt.y));
+        var tt = dl / 900;
+        d.a = Math.atan2(tgt.y + tgt.vy * tt - d.y, tgt.x + tgt.vx * tt - d.x);
+        if (d.cd <= 0) {
+          d.cd = interval;
+          bullets.push({
+            x: d.x + Math.cos(d.a) * 12, y: d.y + Math.sin(d.a) * 12,
+            vx: Math.cos(d.a) * 900, vy: Math.sin(d.a) * 900,
+            dmg: 1, life: 0.8, kind: 'drone'
+          });
+          sound.shot(1560, 0.018, 0.06, 'square');
+        }
+      }
+    }
+  }
+
+  function updateEnemies(dt, playing) {
+    var target = enemyTarget();
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      if (e.dead) continue;
+      e.hurt = Math.max(0, e.hurt - dt);
+      e.rot += e.spin * dt;
+      var dx = player.x - e.x, dy = player.y - e.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (playing && d < 1500) {
+        e.vx += (dx / d) * e.spd * 1.7 * dt;
+        e.vy += (dy / d) * e.spd * 1.7 * dt;
+      }
+      // 贴脸时被柔和弹开，不会伤害玩家
+      if (d < 92) {
+        e.vx -= (dx / d) * e.spd * 4.2 * dt;
+        e.vy -= (dy / d) * e.spd * 4.2 * dt;
+      }
+      // 游荡
+      e.vx += Math.cos(G.time * 1.35 + e.phase) * e.spd * 0.55 * dt;
+      e.vy += Math.sin(G.time * 1.13 + e.phase * 1.7) * e.spd * 0.55 * dt;
+      var sp = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
+      var cap = e.spd * 1.15;
+      if (sp > cap) { e.vx *= cap / sp; e.vy *= cap / sp; }
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+
+      var rr = recycleR();
+      if (dist2(e.x, e.y, camera.x, camera.y) > rr * rr) {
+        enemies[i] = newEnemy(palette.mob, false);
+      }
+    }
+    // 补充数量（屏幕外生成，避免凭空冒出来）
+    for (var n = 0; n < 3 && enemies.length < target; n++) {
+      var ne = newEnemy(palette.mob, false);
+      if (dist2(ne.x, ne.y, player.x, player.y) < 420 * 420) continue;
+      enemies.push(ne);
+    }
+    for (var j = enemies.length - 1; j >= 0; j--) if (enemies[j].dead) enemies.splice(j, 1);
+  }
+
+  function updateBullets(dt) {
+    for (var i = bullets.length - 1; i >= 0; i--) {
+      var b = bullets[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt;
+      var hit = false;
+      for (var j = 0; j < enemies.length; j++) {
+        var e = enemies[j];
+        if (e.dead) continue;
+        var rr = e.r + 5;
+        if (dist2(b.x, b.y, e.x, e.y) < rr * rr) {
+          damageEnemy(e, b.dmg);
+          hit = true;
+          break;
+        }
+      }
+      if (hit || b.life <= 0) bullets.splice(i, 1);
+    }
+  }
+
+  function updateLasers(dt) {
+    for (var i = lasers.length - 1; i >= 0; i--) {
+      lasers[i].life -= dt;
+      if (lasers[i].life <= 0) lasers.splice(i, 1);
+    }
+  }
+
+  function updateFloaters(dt) {
+    for (var i = floaters.length - 1; i >= 0; i--) {
+      var f = floaters[i];
+      f.life -= dt;
+      f.y -= dt * (f.big ? 6 : 26);
+      if (f.life <= 0) floaters.splice(i, 1);
+    }
   }
 
   /* ------------------------------------------------------------
@@ -719,12 +1118,23 @@
           spawnBurst(mm.x, my, mm.tone, 14, 220);
           G.energy += 1;
           G.collected++;
+          addScore(10);
           sound.collect(G.collected);
           motes[k] = newMote(false);
           checkSector();
         }
       }
     }
+
+    /* --- 战斗 --- */
+    if (playing) {
+      updateWeapons(dt);
+      updateDrones(dt);
+    }
+    updateEnemies(dt, playing);
+    updateBullets(dt);
+    updateLasers(dt);
+    updateFloaters(dt);
 
     /* --- 粒子 --- */
     for (var p = particles.length - 1; p >= 0; p--) {
@@ -761,6 +1171,7 @@
 
     /* --- 其它计时 --- */
     G.flash = Math.max(0, G.flash - dt * 1.8);
+    G.lvT = Math.max(0, G.lvT - dt);
     if (G.toast) {
       G.toast.t -= dt;
       if (G.toast.t <= 0) G.toast = null;
@@ -910,10 +1321,9 @@
     ctx.globalCompositeOperation = 'lighter';
     for (var i = 0; i < motes.length; i++) {
       var m = motes[i];
-      var wy = m.y + Math.sin(G.time * m.spd + m.phase) * m.bob;
-      var sx = m.x - camera.x + W / 2;
-      var sy = wy - camera.y + H / 2;
-      if (sx < -70 || sx > W + 70 || sy < -70 || sy > H + 70) continue;
+      var sx = m.x;
+      var sy = m.y + Math.sin(G.time * m.spd + m.phase) * m.bob;
+      if (Math.abs(sx - camera.x) > W / 2 + 70 || Math.abs(sy - camera.y) > H / 2 + 70) continue;
 
       var col = m.tone === 0 ? p.glow : (m.tone === 1 ? p.accent : p.core);
       var pr = m.r * (7.5 + Math.sin(G.time * 2.6 + m.phase) * 1.1);
@@ -944,8 +1354,8 @@
     for (var i = 0; i < shocks.length; i++) {
       var sk = shocks[i];
       var a = clamp(sk.life, 0, 1);
-      ctx.globalAlpha = a * 0.45;
-      ctx.strokeStyle = palette.edge;
+      ctx.globalAlpha = a * (sk.foe ? 0.3 : 0.45);
+      ctx.strokeStyle = sk.foe ? palette.foe : palette.edge;
       ctx.lineWidth = 1 + a * 3;
       ctx.beginPath();
       ctx.arc(sk.x, sk.y, sk.r, 0, TAU);
@@ -974,6 +1384,229 @@
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ------------------------------------------------------------
+     绘制：敌人 / 弹道 / 无人机 / 飘字
+     ------------------------------------------------------------ */
+  function enemyPath(kind, r) {
+    var i, a;
+    ctx.beginPath();
+    if (kind === 'prism') {
+      for (i = 0; i < 4; i++) {
+        a = i * TAU / 4 + Math.PI / 4;
+        var px = Math.cos(a) * r, py = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+    } else if (kind === 'swarm') {
+      for (i = 0; i < 3; i++) {
+        a = i * TAU / 3 - Math.PI / 2;
+        var sx = Math.cos(a) * r, sy = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      }
+    } else {
+      for (i = 0; i < 6; i++) {
+        a = i * TAU / 6;
+        var hx = Math.cos(a) * r, hy = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+      }
+    }
+    ctx.closePath();
+  }
+
+  function drawEnemies() {
+    var p = palette;
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < enemies.length; i++) {
+      var e = enemies[i];
+      if (e.dead) continue;
+      var sx = e.x, sy = e.y;
+      if (Math.abs(sx - camera.x) > W / 2 + 90 || Math.abs(sy - camera.y) > H / 2 + 90) continue;
+
+      var fa = clamp((G.time - e.born) / 0.6, 0, 1);
+      var pr = e.r * 5.4;
+      ctx.globalAlpha = 0.45 * fa;
+      ctx.drawImage(glowSprite(p.foe, 64), sx - pr, sy - pr, pr * 2, pr * 2);
+
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(e.kind === 'swarm' ? Math.atan2(e.vy, e.vx) : e.rot);
+      ctx.globalAlpha = fa;
+
+      enemyPath(e.kind, e.r);
+      ctx.fillStyle = 'rgba(4,8,16,0.88)';
+      ctx.fill();
+      ctx.strokeStyle = e.hurt > 0 ? '#ffffff' : p.foe;
+      ctx.lineWidth = e.hurt > 0 ? 2.6 : 1.9;
+      ctx.stroke();
+      ctx.globalAlpha = fa * 0.35;
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.globalAlpha = fa;
+
+      // 内部结构
+      enemyPath(e.kind, e.r * 0.52);
+      ctx.strokeStyle = rgba(p.foe, 0.45);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      var pulse = 0.55 + 0.45 * Math.sin(G.time * 4.2 + e.phase);
+      ctx.fillStyle = e.hurt > 0 ? '#ffffff' : rgba(p.foe, 0.55 + 0.35 * pulse);
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.2, 0, TAU);
+      ctx.fill();
+
+      if (e.kind === 'prism') {
+        for (var k = 0; k < 3; k++) {
+          var aa = G.time * 1.4 + k * TAU / 3;
+          ctx.fillStyle = rgba(p.foe, 0.7);
+          ctx.beginPath();
+          ctx.arc(Math.cos(aa) * e.r * 1.35, Math.sin(aa) * e.r * 1.35, 1.8, 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawBullets() {
+    var p = palette;
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < bullets.length; i++) {
+      var b = bullets[i];
+      var sx = b.x, sy = b.y;
+      if (Math.abs(sx - camera.x) > W / 2 + 40 || Math.abs(sy - camera.y) > H / 2 + 40) continue;
+      var a = 0.9;
+      var len = b.kind === 'drone' ? 9 : 15;
+      var ang = Math.atan2(b.vy, b.vx);
+      ctx.globalAlpha = a;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(ang);
+      var gd = ctx.createLinearGradient(-len, 0, len * 0.4, 0);
+      gd.addColorStop(0, rgba(p.glow, 0));
+      gd.addColorStop(1, rgba(p.core, 0.95));
+      ctx.fillStyle = gd;
+      ctx.fillRect(-len, -1.6, len * 1.4, 3.2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-2, -0.9, 6, 1.8);
+      ctx.restore();
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(glowSprite(p.glow, 64), sx - 11, sy - 11, 22, 22);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawLasers() {
+    var p = palette;
+    for (var i = 0; i < lasers.length; i++) {
+      var l = lasers[i];
+      var a = clamp(l.life / l.max, 0, 1);
+      var w = l.w * (0.35 + a * 0.85);
+      var sx = l.x, sy = l.y;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(l.a);
+      ctx.globalCompositeOperation = 'lighter';
+
+      var gd = ctx.createLinearGradient(0, 0, l.len, 0);
+      gd.addColorStop(0, rgba(p.core, 0.95 * a));
+      gd.addColorStop(0.5, rgba(p.glow, 0.72 * a));
+      gd.addColorStop(0.82, rgba(p.glow, 0.3 * a));
+      gd.addColorStop(1, rgba(p.glow, 0));
+      ctx.fillStyle = gd;
+      ctx.fillRect(0, -w, l.len, w * 2);
+
+      ctx.globalAlpha = a * 0.5;
+      ctx.fillStyle = rgba(p.glow, 0.55);
+      ctx.fillRect(0, -w * 2.1, l.len * 0.8, w * 4.2);
+
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, -w * 0.34, l.len * 0.9, w * 0.68);
+
+      // 枪口闪光
+      ctx.globalAlpha = a * 0.9;
+      ctx.drawImage(glowSprite(p.core, 64), -34, -34, 68, 68);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+  }
+
+  function drawDrones() {
+    var p = palette;
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < drones.length; i++) {
+      var d = drones[i];
+      var sx = d.x, sy = d.y;
+      if (Math.abs(sx - camera.x) > W / 2 + 60 || Math.abs(sy - camera.y) > H / 2 + 60) continue;
+      var fa = clamp((G.time - d.born) / 0.5, 0, 1);
+
+      // 与母舰的牵引线
+      var pxs = player.x, pys = player.y;
+      ctx.globalAlpha = 0.18 * fa;
+      ctx.strokeStyle = p.edge;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pxs, pys);
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.62 * fa;
+      ctx.drawImage(glowSprite(p.accent, 64), sx - 21, sy - 21, 42, 42);
+
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(d.a || 0);
+      ctx.globalAlpha = fa;
+      // 菱形机身
+      ctx.beginPath();
+      ctx.moveTo(11, 0);
+      ctx.lineTo(0, -6.5);
+      ctx.lineTo(-7, 0);
+      ctx.lineTo(0, 6.5);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(6,12,20,0.92)';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.strokeStyle = rgba(p.glow, 0.9);
+      ctx.lineWidth = 3.4;
+      ctx.globalAlpha = fa * 0.28;
+      ctx.stroke();
+      ctx.globalAlpha = fa;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(2.5, 0, 2.1, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawFloaters() {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var i = 0; i < floaters.length; i++) {
+      var f = floaters[i];
+      var sx = f.x, sy = f.y;
+      var a = clamp(f.life / f.max, 0, 1);
+      ctx.globalAlpha = a * (f.big ? 0.95 : 0.8);
+      ctx.font = (f.big ? '700 15px ' : '600 12px ') + FONT_EN;
+      ctx.fillStyle = f.big ? '#ffffff' : rgba(palette.core, 0.9);
+      ctx.shadowColor = palette.glow;
+      ctx.shadowBlur = f.big ? 18 : 8;
+      ctx.fillText(f.text, sx, sy);
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawTrail() {
@@ -1200,10 +1833,28 @@
   var FONT_CN = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
   var FONT_EN = '"Avenir Next", "Helvetica Neue", Arial, sans-serif';
 
+  function drawHudScrim() {
+    var r1 = 430;
+    var g1 = ctx.createRadialGradient(0, 0, 10, 0, 0, r1);
+    g1.addColorStop(0, 'rgba(1,4,9,0.55)');
+    g1.addColorStop(0.55, 'rgba(1,4,9,0.22)');
+    g1.addColorStop(1, 'rgba(1,4,9,0)');
+    ctx.fillStyle = g1;
+    ctx.fillRect(0, 0, r1, r1);
+
+    var r2 = 260;
+    var g2 = ctx.createRadialGradient(W, 0, 10, W, 0, r2);
+    g2.addColorStop(0, 'rgba(1,4,9,0.5)');
+    g2.addColorStop(1, 'rgba(1,4,9,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(W - r2, 0, r2, r2);
+  }
+
   function drawHUD() {
     var p = palette;
     var pad = 30;
     ctx.textBaseline = 'alphabetic';
+    drawHudScrim();
 
     // --- 左侧：星区 + 进度
     ctx.textAlign = 'left';
@@ -1231,6 +1882,30 @@
     ctx.font = '500 10px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = 'rgba(220,240,255,0.42)';
     ctx.fillText(T('lit') + ' ' + Math.round(pr * 100) + '%', bx, by + 20);
+
+    // --- 左侧：分数 + 武器
+    var sy0 = pad + 98;
+    ctx.textAlign = 'left';
+    ctx.font = '600 10px ' + FONT_EN;
+    ctx.fillStyle = rgba(p.accent, 0.6);
+    spacedText(T('score'), pad, sy0, 2.4, 'left');
+
+    var lvFlash = clamp(G.lvT, 0, 1);
+    ctx.font = '700 26px ' + FONT_EN;
+    ctx.fillStyle = lvFlash > 0 ? '#ffffff' : '#eef8ff';
+    ctx.fillText(String(G.score), pad, sy0 + 28);
+
+    ctx.font = '500 10px ' + (isEN() ? FONT_EN : FONT_CN);
+    ctx.fillStyle = rgba(p.edge, 0.72);
+    var wn = WEAPONS[p.weapon];
+    ctx.fillText((isEN() ? wn.en : wn.zh) + '  LV.' + G.weaponLv, pad, sy0 + 48);
+
+    for (var pi = 0; pi < 5; pi++) {
+      var on = pi < G.weaponLv;
+      ctx.fillStyle = on ? rgba(p.edge, 0.85) : 'rgba(255,255,255,0.13)';
+      rr(pad + pi * 17, sy0 + 57, 13, 3, 1.5);
+      ctx.fill();
+    }
 
     // --- 右侧：星尘计数
     var rx = W - pad - 44;
@@ -1321,7 +1996,7 @@
      绘制：标题 / 暂停
      ------------------------------------------------------------ */
   function layoutTitle() {
-    var cw = 196, ch = 96, gap = 18;
+    var cw = 200, ch = 112, gap = 16;
     var totalW = cw * 3 + gap * 2;
     var x0 = (W - totalW) / 2;
     var y0 = H * 0.55;
@@ -1331,7 +2006,7 @@
     }
     return {
       cards: cards,
-      btn: { x: W / 2 - 130, y: y0 + ch + 34, w: 260, h: 54 }
+      btn: { x: W / 2 - 130, y: y0 + ch + 28, w: 260, h: 54 }
     };
   }
 
@@ -1400,20 +2075,27 @@
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
+      var wcfg = WEAPONS[col.weapon];
       if (isEN()) {
         ctx.font = '600 10.5px ' + FONT_EN;
         ctx.fillStyle = '#eaf6ff';
-        spacedText(col.en, c.x + 58, c.y + c.h / 2 - 13, 1.4, 'left');
+        spacedText(col.en, c.x + 58, c.y + 38, 1.4, 'left');
         ctx.font = '500 11px ' + FONT_CN;
         ctx.fillStyle = rgba(col.accent, 0.7);
-        ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 + 11);
+        ctx.fillText(col.name, c.x + 58, c.y + 58);
+        ctx.font = '600 9.5px ' + FONT_EN;
+        ctx.fillStyle = rgba(col.edge, 0.85);
+        spacedText(wcfg.en, c.x + 58, c.y + 84, 1.2, 'left');
       } else {
         ctx.font = '600 15px ' + FONT_CN;
         ctx.fillStyle = '#eaf6ff';
-        ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 - 12);
+        ctx.fillText(col.name, c.x + 58, c.y + 38);
         ctx.font = '500 8.5px ' + FONT_EN;
         ctx.fillStyle = rgba(col.accent, 0.7);
-        spacedText(col.en, c.x + 59, c.y + c.h / 2 + 10, 1.8, 'left');
+        spacedText(col.en, c.x + 59, c.y + 58, 1.8, 'left');
+        ctx.font = '600 10px ' + FONT_CN;
+        ctx.fillStyle = rgba(col.edge, 0.85);
+        ctx.fillText(wcfg.zh, c.x + 58, c.y + 84);
       }
 
       if (sel) {
@@ -1507,11 +2189,16 @@
     drawRings();
     drawShocks();
     drawMotes();
+    drawEnemies();
+    drawBullets();
+    drawDrones();
+    drawLasers();
     if (G.state !== 'title') {
       drawTrail();
       drawPlayerWorld();
     }
     drawParticles();
+    drawFloaters();
     ctx.restore();
 
     drawFlash();
@@ -1653,6 +2340,8 @@
   window.__stardust = {
     G: G, player: player, input: input, sound: sound, camera: camera,
     motes: motes, rings: rings, particles: particles, shocks: shocks,
+    enemies: enemies, bullets: bullets, lasers: lasers, drones: drones,
+    floaters: floaters, weapon: weapon, addScore: addScore,
     startGame: startGame, setPalette: setPalette, checkSector: checkSector,
     setLang: setLang, getLang: function () { return lang; }
   };
