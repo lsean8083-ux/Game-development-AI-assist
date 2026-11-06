@@ -41,11 +41,20 @@ Switching theme swaps your weapon, your enemies, and the colour of the whole sec
 | Theme | Weapon | Feel | Foe |
 |---|---|---|---|
 | **AURORA CYAN** | **ION BURST** | Rapid bolts; the faster you fly, the faster it fires | Drifter — hex hull, tanky |
-| **CRIMSON PULSE** | **PHASE LANCE** | Charges up, then fires a piercing beam through a whole line | Prism — splits into two smaller shards |
+| **CRIMSON PULSE** | **PHASE RAM** | No gun at all: builds speed, grows a blade, and shatters foes by flying through them | Prism — splits into two smaller shards |
 | **AMBER EMBER** | **BROOD CARRIER** | Never fires itself: launches escort gunships that orbit and engage | Swarm — fast and numerous |
 
 ![Aurora Cyan](preview/02-play-cyan.jpg)
 ![Crimson Pulse](preview/05-play-pink.jpg)
+
+### Ramming with CRIMSON PULSE
+
+Hold the cursor far ahead and commit to a line. Your probe is the fastest of the three themes
+(top speed 889 vs 780) and the slipperiest, so a straight run keeps building momentum. Once you pass
+**300 px/s** the blade arms — the HUD reads `RAM READY` and a glowing wedge grows out of the nose.
+Touching a foe then destroys it instantly: **screen shake, impact ring, sparks, `RAM +n`**, and
++70 px/s of momentum out of the hit, so each kill feeds the next one. Bumping a foe below the
+threshold does nothing but shove it — fly faster.
 
 ### Higher score → stronger weapon
 
@@ -54,10 +63,10 @@ Crossing a score threshold upgrades the weapon automatically. The HUD shows five
 | Level | Score needed | Effect |
 |---|---|---|
 | LV.1 | 0 | Base form |
-| LV.2 | 600 | Faster fire rate / charge |
-| LV.3 | 1,600 | ION BURST twin shot; +1 beam damage; +1 drone |
-| LV.4 | 3,200 | More damage and rate again |
-| LV.5 | 5,600 | ION BURST triple shot; carrier runs a full wing of 6 |
+| LV.2 | 800 | Faster fire rate |
+| LV.3 | 2,200 | ION BURST twin shot; one more escort gunship |
+| LV.4 | 4,200 | More bullets, more escorts |
+| LV.5 | 7,000 | ION BURST triple shot; the carrier runs a full wing of six |
 
 Enemies cannot hurt you — there is no health and no game over. They approach, drift, and get shot down.
 
@@ -67,7 +76,7 @@ Enemies cannot hurt you — there is no health and no game over. They approach, 
 
 **Feel first (it is a relaxation game)**
 - No health, no timer, no death; the only "penalty" is drifting while you coast.
-- Inertia tuning: 980 px/s² acceleration, 1.35/s damping, 780 px/s cap — like gliding on ice.
+- Inertia tuning: 980 px/s² acceleration and exponential damping, like gliding on ice. Each theme has its own cap and grip — 780 px/s @1.35 (cyan), 889 @1.12 (crimson), 757 @1.45 (amber).
 - Generous pickup radii (stardust +30px, ring inner 86%) so a casual pass still rewards you.
 - Auto-fire with predictive aim: enemies pop even if you never aim.
 
@@ -94,10 +103,24 @@ Enemies cannot hurt you — there is no health and no game over. They approach, 
 
 ```
 index.html            # everything: HTML + CSS + JS (~2k lines), no external dependencies
+py/combat_model.py    # readable Python copy of the combat maths (not used at runtime)
 README.md             # this file
 README.zh-CN.md       # Chinese version
 preview/              # screenshots
 ```
+
+## Python mechanics model
+
+`py/combat_model.py` restates the tuning — speeds, damping, level thresholds, fire intervals,
+ram reach and bonuses, escort counts — as small pure functions plus a printed report.
+Run it to read or experiment with the numbers:
+
+```bash
+python3 py/combat_model.py
+```
+
+It is a reference document, not part of the build: editing it does **not** change the game.
+
 
 ## Dev parameters (optional)
 
