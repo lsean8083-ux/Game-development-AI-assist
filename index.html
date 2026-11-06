@@ -55,7 +55,7 @@
     },
     {
       id: 'ember', name: '琥珀星火', en: 'AMBER EMBER',
-      weapon: 'carrier', mob: 'swarm', foe: '#8fb6ff', spd: 0.84, damp: 1.52, scale: 1.82,
+      weapon: 'carrier', mob: 'swarm', foe: '#8fb6ff', spd: 0.70, damp: 1.56, scale: 1.82,
       hull1: '#2b1a08', hull2: '#ffc35c', edge: '#fff0cc',
       core: '#fff6dd', glow: '#ffab3d', accent: '#ffd98a',
       neb: ['#8f4a12', '#6b1f3a', '#7a5a10'],
@@ -184,6 +184,10 @@
       toast: '星 区 点 亮',
       paused: '已 暂 停',
       pauseHint: '按 P 或点击任意处继续 · R 回到标题 · M 静音 · 1/2/3 切换配色',
+      navPing: '导航 · 坐标指引',
+      navPingSub: '敌方生成点方位已接入',
+      fortDown: '堡垒已摧毁',
+      fortDownSub: '敌方生成点转移到别处',
       langBtn: 'EN'
     },
     en: {
@@ -202,6 +206,10 @@
       toast: 'SECTOR LIT',
       paused: 'P A U S E D',
       pauseHint: 'Press P or click anywhere to resume · R for title · M mute · 1/2/3 palette',
+      navPing: 'NAV · BEARING LOCKED',
+      navPingSub: 'Fortress coordinates linked',
+      fortDown: 'FORTRESS DESTROYED',
+      fortDownSub: 'Spawn point relocated',
       langBtn: '中文'
     }
   };
@@ -240,6 +248,15 @@
   var lasers = [];
   var drones = [];
   var floaters = [];
+
+  // 太空堡垒：敌机的生成点，血量厚、藏得远，只有导航指引才找得到
+  var FORT = { r: 92, hp: 150, score: 2000 };
+  var fort = {
+    x: 0, y: 0, hp: 0, maxHp: 0, alive: false,
+    rot: 0, respawn: 0, hitT: 0, launchT: 0, born: 0
+  };
+  // 导航：每 10 个「积分等级」解锁一次坐标指引
+  var nav = { rank: 1, pingT: 0, pings: 0 };
 
   // 烘焙贴图：整屏背景 / 暗角 / 半分辨率星云
   var bgBaked = document.createElement('canvas');
@@ -465,6 +482,8 @@
     G.sector = 1; G.energy = 0; G.collected = 0; G.ringsPass = 0;
     G.flash = 0; G.toast = null; G.playT = 0;
     G.score = 0; G.weaponLv = 1; G.kills = 0; G.lvT = 0; G.shake = 0; G.ramFlash = 0;
+    nav.rank = 1; nav.pingT = 0; nav.pings = 0;
+    fort.alive = false; fort.respawn = 0; newFort();
     enemies.length = 0; bullets.length = 0; lasers.length = 0;
     drones.length = 0; floaters.length = 0;
     var i;
@@ -763,8 +782,9 @@
     G.sector++;
     G.flash = 1;
     G.toast = {
-      t: 3.4,
-      sector: G.sector - 1
+      t: 3.4, dur: 3.4,
+      big: T('toast'),
+      small: 'SECTOR ' + String(G.sector - 1).padStart(2, '0') + '  CLEARED'
     };
     sound.sectorUp();
     addScore(500);
@@ -842,12 +862,19 @@
     floaters.push({ x: e.x, y: e.y - 8, text: '+' + e.score, life: 0.95, max: 0.95, tone: 2 });
     sound.boom();
     if (motes.length < 60 && Math.random() < 0.45) motes.push(newMoteAt(e.x, e.y));
-    if (e.kind === 'prism' && e.gen < 2) {
+    // 棱镜最多分裂 3 代（gen 0→1→2→3 后停止），并且场上总数受限，
+    // 否则一串分裂就能堆满屏幕。
+    var gen = e.gen || 0;
+    if (e.kind === 'prism' && gen < 3 && enemies.length < 12) {
       var M = MOBS.prism;
       for (var i = 0; i < 2; i++) {
         var a = (i ? 1 : -1) * rand(0.6, 1.3);
         var c = newEnemy('prism', false, e.x + Math.cos(a) * 18, e.y + Math.sin(a) * 18);
-        c.gen = 2; c.r = M.r * 0.62; c.hp = 2; c.maxHp = 2; c.score = 40;
+        c.gen = gen + 1;
+        c.r = M.r * Math.pow(0.72, c.gen);
+        c.hp = Math.max(1, M.hp - c.gen);
+        c.maxHp = c.hp;
+        c.score = Math.max(10, Math.round(M.score * Math.pow(0.55, c.gen)));
         c.vx = Math.cos(a) * 150; c.vy = Math.sin(a) * 150;
         enemies.push(c);
       }
@@ -939,6 +966,22 @@
         return;
       }
     }
+
+    // 冲撞太空堡垒
+    if (fort.alive && weapon.ramCd <= 0) {
+      var fx = fort.x - player.x, fy = fort.y - player.y;
+      var fd = Math.sqrt(fx * fx + fy * fy) || 1;
+      if (fd < FORT.r + 40) {
+        weapon.ramCd = 0.12;
+        damageFort(Math.round(6 + sp / 40), player.x + (fx / fd) * FORT.r, player.y + (fy / fd) * FORT.r);
+        G.shake = Math.min(1, G.shake + 0.5);
+        G.ramFlash = 1;
+        spawnBurst(player.x + (fx / fd) * 30, player.y + (fy / fd) * 30, 0, 18, 460, true);
+        sound.ram();
+        player.vx -= (fx / fd) * 60;
+        player.vy -= (fy / fd) * 60;
+      }
+    }
   }
 
   function spawnDrone() {
@@ -974,13 +1017,21 @@
     var interval = Math.max(0.38, 0.8 - (lv - 1) * 0.07);
     for (var i = 0; i < drones.length; i++) {
       var d = drones[i];
-      var base = G.time * 1.1 + d.phase;
+      var base = G.time * 1.45 + d.phase;
       var rad = (54 + i * 10) * (shipScale() / 1.18);
       var tx = player.x + Math.cos(base) * rad;
       var ty = player.y + Math.sin(base) * rad;
-      var k = 1 - Math.exp(-7 * dt);
-      d.x = lerp(d.x, tx, k);
-      d.y = lerp(d.y, ty, k);
+      // 护航机按自己的速度飞（上限 1500 px/s，远快于航母的 546），
+      // 所以能看到它们绕着母舰急转、抢位、扑出去开火。
+      var ox = tx - d.x, oy = ty - d.y;
+      var od = Math.sqrt(ox * ox + oy * oy) || 1;
+      var want = Math.min(1500, od * 11);
+      var ax = (ox / od) * want, ay = (oy / od) * want;
+      var kk = 1 - Math.exp(-10 * dt);
+      d.vx = (d.vx || 0) + (ax - (d.vx || 0)) * kk;
+      d.vy = (d.vy || 0) + (ay - (d.vy || 0)) * kk;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
       d.cd -= dt;
       var tgt = nearestEnemy(d.x, d.y, 900);
       if (tgt) {
@@ -1037,7 +1088,15 @@
     }
     // 补充数量（屏幕外生成，避免凭空冒出来）
     for (var n = 0; n < 3 && enemies.length < target; n++) {
-      var ne = newEnemy(palette.mob, false);
+      var ne;
+      if (fort.alive && dist2(fort.x, fort.y, player.x, player.y) < 2600 * 2600) {
+        // 靠近堡垒时，敌机直接从堡垒里放出来
+        var fa2 = Math.random() * TAU;
+        ne = newEnemy(palette.mob, false,
+          fort.x + Math.cos(fa2) * (FORT.r + 50), fort.y + Math.sin(fa2) * (FORT.r + 50));
+      } else {
+        ne = newEnemy(palette.mob, false);
+      }
       if (dist2(ne.x, ne.y, player.x, player.y) < 420 * 420) continue;
       enemies.push(ne);
     }
@@ -1051,6 +1110,13 @@
       b.y += b.vy * dt;
       b.life -= dt;
       var hit = false;
+      if (fort.alive) {
+        var fr = FORT.r + 6;
+        if (dist2(b.x, b.y, fort.x, fort.y) < fr * fr) {
+          damageFort(b.dmg, b.x, b.y);
+          hit = true;
+        }
+      }
       for (var j = 0; j < enemies.length; j++) {
         var e = enemies[j];
         if (e.dead) continue;
@@ -1084,6 +1150,271 @@
   /* ------------------------------------------------------------
      更新
      ------------------------------------------------------------ */
+
+  /* ------------------------------------------------------------
+     太空堡垒：敌机的生成点
+     ------------------------------------------------------------ */
+  function newFort() {
+    var a = Math.random() * TAU;
+    var d = rand(3000, 5600);       // 藏得很远，不在视野里
+    fort.x = player.x + Math.cos(a) * d;
+    fort.y = player.y + Math.sin(a) * d;
+    fort.maxHp = FORT.hp + (G.sector - 1) * 40;
+    fort.hp = fort.maxHp;
+    fort.alive = true;
+    fort.rot = Math.random() * TAU;
+    fort.hitT = 0;
+    fort.launchT = 5;
+    fort.born = G.time;
+    fort.respawn = 0;
+  }
+
+  function fortDist() {
+    return Math.sqrt(dist2(fort.x, fort.y, player.x, player.y));
+  }
+
+  function launchFromFort(n) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * TAU;
+      var e = newEnemy(palette.mob, false,
+        fort.x + Math.cos(a) * (FORT.r + 44), fort.y + Math.sin(a) * (FORT.r + 44));
+      if (e) enemies.push(e);
+    }
+    sound.boom();
+  }
+
+  function damageFort(dmg, hx, hy) {
+    if (!fort.alive) return;
+    fort.hp -= dmg;
+    fort.hitT = 0.22;
+    spawnBurst(hx === undefined ? fort.x : hx, hy === undefined ? fort.y : hy, 1, 4, 260);
+    if (fort.hp <= 0) destroyFort();
+  }
+
+  function destroyFort() {
+    fort.alive = false;
+    fort.respawn = 9;
+    addScore(FORT.score);
+    floaters.push({ x: fort.x, y: fort.y - 50, text: '+' + FORT.score, life: 1.7, max: 1.7, tone: 2 });
+    G.shake = 1.6;
+    G.flash = Math.max(G.flash, 0.55);
+    for (var i = 0; i < 5; i++) shocks.push({ x: fort.x, y: fort.y, r: 24 + i * 26, life: 0.9, foe: true });
+    spawnBurst(fort.x, fort.y, 1, 64, 620, true);
+    spawnBurst(fort.x, fort.y, 0, 40, 340);
+    // 顺带清掉堡垒周围的小怪，给一点干净空间
+    var list = enemies.slice();
+    for (var k = 0; k < list.length; k++) {
+      if (!list[k].dead && dist2(list[k].x, list[k].y, fort.x, fort.y) < 780 * 780) killEnemy(list[k]);
+    }
+    sound.boom();
+    sound.levelUp();
+    G.toast = { big: T('fortDown'), small: T('fortDownSub'), t: 3.8, dur: 3.8 };
+  }
+
+  function updateFort(dt, playing) {
+    // 导航：每 10 个积分等级给一次坐标指引
+    var rank = 1 + Math.floor(G.score / 300);
+    if (playing && Math.floor(rank / 10) > Math.floor(nav.rank / 10)) {
+      nav.pingT = 12;
+      nav.pings++;
+      G.toast = { big: T('navPing'), small: T('navPingSub'), t: 3.2, dur: 3.2 };
+      sound.levelUp();
+    }
+    nav.rank = rank;
+    if (nav.pingT > 0) nav.pingT = Math.max(0, nav.pingT - dt);
+
+    if (!fort.alive) {
+      if (playing) {
+        fort.respawn -= dt;
+        if (fort.respawn <= 0) newFort();
+      }
+      return;
+    }
+
+    fort.rot += dt * 0.34;
+    fort.hitT = Math.max(0, fort.hitT - dt);
+    if (!playing) return;
+
+    fort.launchT -= dt;
+    if (fort.launchT <= 0) {
+      fort.launchT = Math.max(2.6, 5.4 - G.sector * 0.35);
+      if (fortDist() < 2600 && enemies.length < 13) launchFromFort(2);
+    }
+  }
+
+  function drawFort() {
+    if (!fort.alive) return;
+    if (Math.abs(fort.x - camera.x) > W / 2 + 240 || Math.abs(fort.y - camera.y) > H / 2 + 240) return;
+    var p = palette;
+    var R = FORT.r;
+    var fa = clamp((G.time - fort.born) / 1.4, 0, 1);
+    var hurt = fort.hitT > 0;
+    var edge = hurt ? '#ffffff' : p.foe;
+
+    ctx.save();
+    ctx.translate(fort.x, fort.y);
+    ctx.globalAlpha = fa;
+
+    // 实心船体：先画暗色外壳，否则远看只是一圈线框
+    ctx.save();
+    ctx.rotate(fort.rot);
+    ctx.beginPath();
+    for (var h = 0; h < 6; h++) {
+      var ha = (h / 6) * TAU;
+      var hx0 = Math.cos(ha) * R * 0.94, hy0 = Math.sin(ha) * R * 0.94;
+      if (h === 0) ctx.moveTo(hx0, hy0); else ctx.lineTo(hx0, hy0);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(5,9,16,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = rgba(p.foe, 0.35);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // 六个炮位
+    for (var t2 = 0; t2 < 6; t2++) {
+      var ta = (t2 / 6) * TAU;
+      var tx2 = Math.cos(ta) * R * 0.94, ty2 = Math.sin(ta) * R * 0.94;
+      ctx.beginPath();
+      ctx.arc(tx2, ty2, 5.5, 0, TAU);
+      ctx.fillStyle = 'rgba(10,16,26,0.95)';
+      ctx.fill();
+      ctx.strokeStyle = rgba(p.foe, 0.75);
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 外部辉光
+    ctx.globalAlpha = fa * 0.55;
+    ctx.drawImage(glowSprite(hurt ? '#ffffff' : p.foe, 128), -R * 2.4, -R * 2.4, R * 4.8, R * 4.8);
+    ctx.globalAlpha = fa;
+
+    // 外层能量环
+    ctx.strokeStyle = rgba(edge, 0.4);
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 16, 0, TAU);
+    ctx.stroke();
+
+    // 旋转六边形骨架
+    ctx.save();
+    ctx.rotate(fort.rot);
+    ctx.strokeStyle = rgba(edge, 0.85);
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    for (var i = 0; i < 6; i++) {
+      var a = (i / 6) * TAU;
+      var px = Math.cos(a) * R, py = Math.sin(a) * R;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    // 碳架
+    ctx.globalAlpha = fa * 0.55;
+    ctx.lineWidth = 1.1;
+    for (var j = 0; j < 6; j++) {
+      var aj = (j / 6) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(aj) * R, Math.sin(aj) * R);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = fa;
+    ctx.restore();
+
+    // 反向转的内环
+    ctx.save();
+    ctx.rotate(-fort.rot * 1.7);
+    ctx.strokeStyle = rgba(edge, 0.6);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (var k = 0; k < 6; k++) {
+      var ak = (k / 6) * TAU;
+      var kx = Math.cos(ak) * R * 0.56, ky = Math.sin(ak) * R * 0.56;
+      if (k === 0) ctx.moveTo(kx, ky); else ctx.lineTo(kx, ky);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    // 核心
+    var pulse = 0.55 + 0.45 * Math.sin(G.time * 2.6);
+    ctx.globalAlpha = fa * (0.5 + pulse * 0.4);
+    ctx.drawImage(glowSprite(hurt ? '#ffffff' : p.foe, 96), -R * 0.9, -R * 0.9, R * 1.8, R * 1.8);
+    ctx.globalAlpha = fa;
+    ctx.fillStyle = rgba(edge, 0.9);
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.2 + pulse * 3, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+
+    // 血条
+    if (fort.hp < fort.maxHp) {
+      var bw = 148, bh = 5;
+      var bx = fort.x - bw / 2, by = fort.y - R - 34;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = 'rgba(6,10,18,0.7)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = rgba(p.foe, 0.95);
+      ctx.fillRect(bx, by, bw * clamp(fort.hp / fort.maxHp, 0, 1), bh);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawNav() {
+    if (!fort.alive || nav.pingT <= 0) return;
+    var p = palette;
+    var d = fortDist();
+    var sx = W / 2 + (fort.x - camera.x);
+    var sy = H / 2 + (fort.y - camera.y);
+    var onScreen = sx > 60 && sx < W - 60 && sy > 60 && sy < H - 60;
+    var pulse = 0.55 + 0.45 * Math.sin(G.time * 4);
+
+    ctx.save();
+    if (onScreen) {
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = p.foe;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 30 + Math.sin(G.time * 3) * 5, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 0.7;
+      ctx.font = '500 10px ' + FONT_EN;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f2f7ff';
+      ctx.fillText('NAV ' + Math.round(d / 10) + 'm', sx, sy + 52);
+    } else {
+      var ang = Math.atan2(sy - H / 2, sx - W / 2);
+      var ex = W / 2 + Math.cos(ang) * W * 0.42;
+      var ey = H / 2 + Math.sin(ang) * H * 0.40;
+      ex = clamp(ex, 52, W - 52);
+      ey = clamp(ey, 52, H - 52);
+      ctx.translate(ex, ey);
+      ctx.rotate(ang);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = p.foe;
+      ctx.beginPath();
+      ctx.moveTo(18, 0);
+      ctx.lineTo(-9, 10);
+      ctx.lineTo(-3, 0);
+      ctx.lineTo(-9, -10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.rotate(-ang);
+      ctx.globalAlpha = 0.8;
+      ctx.textAlign = 'center';
+      ctx.font = '500 10px ' + FONT_EN;
+      ctx.fillStyle = '#f2f7ff';
+      ctx.fillText('NAV ' + Math.round(d / 10) + 'm', 0, 30);
+    }
+    ctx.restore();
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
   function update(dt) {
     G.time += dt;
     var playing = G.state === 'play';
@@ -1191,6 +1522,7 @@
       updateWeapons(dt);
       updateDrones(dt);
     }
+    updateFort(dt, playing);
     updateEnemies(dt, playing);
     updateBullets(dt);
     updateLasers(dt);
@@ -2098,7 +2430,8 @@
     // --- 星区点亮提示
     if (G.toast) {
       var t = G.toast.t;
-      var al = clamp(t / 1.1, 0, 1) * clamp((3.4 - t) * 4, 0, 1);
+      var dur = G.toast.dur || 3.4;
+      var al = clamp(t / 1.1, 0, 1) * clamp((dur - t) * 4, 0, 1);
       ctx.globalAlpha = al;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -2106,16 +2439,20 @@
       ctx.shadowBlur = 26;
       ctx.font = '700 ' + (isEN() ? 26 : 30) + 'px ' + (isEN() ? FONT_EN : FONT_CN);
       ctx.fillStyle = '#f2ffff';
-      if (isEN()) spacedText(T('toast'), W / 2, H * 0.3, 6, 'center');
-      else ctx.fillText(T('toast'), W / 2, H * 0.3);
+      var bigTxt = G.toast.big || T('toast');
+      var smallTxt = G.toast.small || '';
+      if (isEN()) spacedText(bigTxt, W / 2, H * 0.3, 6, 'center');
+      else ctx.fillText(bigTxt, W / 2, H * 0.3);
       ctx.shadowBlur = 0;
       ctx.font = '500 11px ' + FONT_EN;
       ctx.fillStyle = rgba(p.accent, 0.8);
-      spacedText('SECTOR ' + String(G.toast.sector).padStart(2, '0') + '  CLEARED',
-        W / 2, H * 0.3 + 34, 3, 'center');
+      if (isEN()) spacedText(smallTxt, W / 2, H * 0.3 + 34, 3, 'center');
+      else ctx.fillText(smallTxt, W / 2, H * 0.3 + 34);
       ctx.globalAlpha = 1;
       ctx.textBaseline = 'alphabetic';
     }
+
+    if (G.state === 'play') drawNav();
   }
 
   function drawMute() {
@@ -2350,6 +2687,7 @@
     drawRings();
     drawShocks();
     drawMotes();
+    drawFort();
     drawEnemies();
     drawBullets();
     drawDrones();
@@ -2505,6 +2843,8 @@
     enemies: enemies, bullets: bullets, lasers: lasers, drones: drones,
     floaters: floaters, weapon: weapon, addScore: addScore,
     palette: function () { return palette; }, ramArmed: ramArmed,
+    fort: fort, nav: nav, newFort: newFort, damageFort: damageFort,
+    newEnemy: newEnemy, killEnemy: killEnemy, damageEnemy: damageEnemy,
     startGame: startGame, setPalette: setPalette, checkSector: checkSector,
     setLang: setLang, getLang: function () { return lang; }
   };

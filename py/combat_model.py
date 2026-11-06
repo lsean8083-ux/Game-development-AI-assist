@@ -73,7 +73,7 @@ class Theme:
 THEMES = (
     Theme("aurora", "极光青", "AURORA CYAN", "bolt", "drifter", 1.00, 1.35, 1.18),
     Theme("pulse", "绯红脉冲", "CRIMSON PULSE", "ram", "prism", 1.14, 1.12, 1.08),
-    Theme("ember", "琥珀星火", "AMBER EMBER", "carrier", "swarm", 0.84, 1.52, 1.82),
+    Theme("ember", "琥珀星火", "AMBER EMBER", "carrier", "swarm", 0.70, 1.56, 1.82),
 )
 
 # ---------------------------------------------------------------- 通用公式
@@ -214,6 +214,31 @@ def enemy_target(theme: Theme, sector: int) -> int:
     return base
 
 
+# ---------------------------------------------------------------- 太空堡垒
+FORT_R = 92            # 半径
+FORT_HP = 150          # 基础血量，每进一个星区 +40
+FORT_SCORE = 2000      # 摧毁奖励
+FORT_SPAWN_RANGE = (3000, 5600)   # 出生半径：永远在视野外，很难撞见
+FORT_RESPAWN = 9.0     # 摧毁后多久在别处重生
+FORT_LAUNCH = (2.6, 5.4)          # 放敌机的间隔（随星区缩短）
+
+NAV_STEP = 300         # 每 300 分算一个「积分等级」
+NAV_EVERY = 10         # 每 10 个等级给一次坐标指引
+NAV_PING = 12.0        # 一次指引持续多少秒
+
+PRISM_SPLIT_GEN = 3    # 棱镜最多分裂 3 代
+PRISM_SPLIT_CAP = 12   # 场上敌机超过这个数就不再分裂
+
+
+def fort_hp(sector: int) -> int:
+    return FORT_HP + (sector - 1) * 40
+
+
+def nav_ping_score(rank_multiple: int = NAV_EVERY) -> int:
+    """第 n 次坐标指引需要多少分。"""
+    return rank_multiple * NAV_STEP
+
+
 # ---------------------------------------------------------------- 飞行手感
 
 
@@ -288,6 +313,25 @@ def report() -> None:
     for th in THEMES:
         row = "".join(f"{enemy_target(th, sec):>10}" for sec in (1, 2, 3, 5))
         print(f"{th.name_zh:<8}{row}")
+
+    print("\n" + line)
+    print("[太空堡垒]  敌机生成点")
+    print(f"{'星区':<8}" + "".join(f"{s:>10}" for s in (1, 2, 3, 5)))
+    print(f"{'血量':<8}" + "".join(f"{fort_hp(s):>10}" for s in (1, 2, 3, 5)))
+    print(f"摧毁奖励 {FORT_SCORE} 分 · 出生距离 {FORT_SPAWN_RANGE[0]}~{FORT_SPAWN_RANGE[1]}px"
+          f" · {FORT_RESPAWN:.0f}s 后换地方重生")
+    print(f"导航：每 {NAV_STEP} 分升一级，每 {NAV_EVERY} 级（{nav_ping_score()} 分）给一次 "
+          f"{NAV_PING:.0f}s 坐标指引")
+
+    print("\n" + line)
+    print(f"[棱镜分裂]  最多 {PRISM_SPLIT_GEN} 代，场上超过 {PRISM_SPLIT_CAP} 架就不再分裂")
+    count, gen = 1, 0
+    while gen < PRISM_SPLIT_GEN:
+        gen += 1
+        count *= 2
+        hp = max(1, 4 - gen)
+        print(f"  第 {gen} 代：{count} 架 · 每架 {hp} HP · 单架 {max(10, round(80 * 0.55 ** gen))} 分")
+    print(f"  一条血缘最多 {count} 架，全部打完就彻底结束")
 
     print("\n[武器等级门槛]")
     for i, need in enumerate(LEVELS, start=1):
