@@ -175,11 +175,12 @@ def wait_for_target(port: int, timeout: float = 25.0) -> str:
     raise SystemExit(f"等不到调试目标（{last}）")
 
 
-def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[int, int]) -> int:
+def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[int, int],
+        baseline: bool = False) -> int:
     view_w, view_h = size
     port = 9333
     profile = tempfile.mkdtemp(prefix="dsh-soak-")
-    url = f"{GAME_URL}?autostart&palette={palette}"
+    url = "about:blank" if baseline else f"{GAME_URL}?autostart&palette={palette}"
     args = [
         chrome,
         f"--remote-debugging-port={port}",
@@ -205,7 +206,7 @@ def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[in
         })
         time.sleep(1.0)
 
-        if not cdp.js("!!(window.__stardust && window.__stardust.startGame)"):
+        if not baseline and not cdp.js("!!(window.__stardust && window.__stardust.startGame)"):
             raise SystemExit("游戏没加载起来（window.__stardust 不存在）")
 
         # 帧计数：和游戏自己抢一帧，只为了量 fps
@@ -214,7 +215,8 @@ def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[in
             "(function tick(){ window.__frames++; requestAnimationFrame(tick); })();"
         )
 
-        print(f"跑 {seconds:.0f}s · 配色 {palette} · {view_w}x{view_h} …", flush=True)
+        what = "空页面基线" if baseline else f"配色 {palette}"
+        print(f"跑 {seconds:.0f}s · {what} · {view_w}x{view_h} …", flush=True)
         cx, cy = view_w / 2, view_h / 2
         start = time.time()
         while time.time() - start < seconds:
@@ -226,6 +228,12 @@ def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[in
             cdp.mouse("mouseMoved", x, y)
             time.sleep(0.06)
 
+        if baseline:
+            fps = cdp.js("Math.round(window.__frames / ((performance.now() - window.__t0) / 1000))")
+            print(f"\n空页面基线：{fps} fps")
+            print("（这个数字是这台机器/这个浏览器当前的渲染上限，用来判断掉帧是游戏负载还是环境）")
+            return 0
+
         stats = json.loads(cdp.js(
             "JSON.stringify({"
             " fps: Math.round(window.__frames / ((performance.now() - window.__t0) / 1000)),"
@@ -233,7 +241,8 @@ def run(seconds: float, palette: int, headful: bool, chrome: str, size: tuple[in
             " lv: __stardust.G.weaponLv, sector: __stardust.G.sector,"
             " enemies: __stardust.enemies.length, motes: __stardust.motes.length,"
             " drones: __stardust.drones.length,"
-            " fortHp: Math.round(__stardust.fort.hp), fortAlive: __stardust.fort.alive,"
+            " fortHp: __stardust.fort ? Math.round(__stardust.fort.hp) : 0,"
+            " fortAlive: __stardust.fort ? __stardust.fort.alive : false,"
             " palette: __stardust.palette().id"
             "})"
         ))
@@ -269,13 +278,16 @@ def main() -> int:
                         help="1 极光青 / 2 绯红脉冲 / 3 琥珀星火")
     parser.add_argument("--size", default="1440x900", help="画布分辨率，例如 1440x900 / 1280x720")
     parser.add_argument("--headful", action="store_true", help="开一个真窗口看它跑")
+    parser.add_argument("--baseline", action="store_true",
+                        help="跑一个空页面量基线帧率，用来区分环境限制和游戏负载")
     parser.add_argument("--chrome", default=None, help="Chrome 可执行文件路径")
     args = parser.parse_args()
     try:
         view_w, view_h = (int(v) for v in args.size.lower().split("x"))
     except ValueError:
         raise SystemExit("--size 需要形如 1440x900")
-    return run(args.seconds, args.palette, args.headful, args.chrome or find_chrome(), (view_w, view_h))
+    return run(args.seconds, args.palette, args.headful, args.chrome or find_chrome(), (view_w, view_h),
+               args.baseline)
 
 
 if __name__ == "__main__":

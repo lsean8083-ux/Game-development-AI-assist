@@ -113,7 +113,8 @@ Every foe comes from one **space fortress**: thick hull, parked 3000–5600 px a
 **Performance**
 - Base image and vignette are pre-baked; they only redraw on resize or palette change.
 - Nebulae composite into a quarter-resolution canvas and get upscaled once, cutting fill-rate dramatically.
-- Measured with `py/soak_test.py` (Chrome headless, **software rasteriser, no GPU**, real mouse input): 60 fps at 1024×640, 56 fps at 1280×720, 47 fps at 1440×900. A normal GPU-accelerated browser holds 60.
+- Measured with `py/soak_test.py` (Chrome headless, **software rasteriser, no GPU**, real mouse input): 60 fps at 1024×640, 56 at 1280×720, 47 at 1440×900 on an idle machine. A normal GPU-accelerated browser holds 60.
+- These numbers track machine load more than code (same build, same machine: 60 fps on a blank page but 25 fps in game when the computer is busy). That is what `--baseline` is for — measure the blank-page ceiling first, then the game, and you can tell "heavy game" from "busy machine".
 - Entities recycle by view radius and respawn just off-screen with a fade-in, keeping density stable.
 
 ---
