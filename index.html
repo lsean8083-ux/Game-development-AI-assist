@@ -39,7 +39,7 @@
   var PALETTES = [
     {
       id: 'aurora', name: '极光青', en: 'AURORA CYAN',
-      weapon: 'bolt', mob: 'drifter', foe: '#ff6fb5', spd: 1.0, damp: 1.35,
+      weapon: 'bolt', mob: 'drifter', foe: '#ff6fb5', spd: 1.0, damp: 1.35, scale: 1.18,
       hull1: '#0a2233', hull2: '#3ae6c8', edge: '#c4fff6',
       core: '#e6fffb', glow: '#2ff0d0', accent: '#7ef0ff',
       neb: ['#0d5f74', '#183d8f', '#0b7f6e'],
@@ -47,7 +47,7 @@
     },
     {
       id: 'pulse', name: '绯红脉冲', en: 'CRIMSON PULSE',
-      weapon: 'ram', mob: 'prism', foe: '#5ff0ff', spd: 1.14, damp: 1.12,
+      weapon: 'ram', mob: 'prism', foe: '#5ff0ff', spd: 1.14, damp: 1.12, scale: 1.08,
       hull1: '#2a0a1a', hull2: '#ff4f86', edge: '#ffd6e4',
       core: '#ffe4ee', glow: '#ff3d78', accent: '#ff9ac0',
       neb: ['#7a1040', '#3a1266', '#5c1240'],
@@ -55,7 +55,7 @@
     },
     {
       id: 'ember', name: '琥珀星火', en: 'AMBER EMBER',
-      weapon: 'carrier', mob: 'swarm', foe: '#8fb6ff', spd: 0.97, damp: 1.45,
+      weapon: 'carrier', mob: 'swarm', foe: '#8fb6ff', spd: 0.84, damp: 1.52, scale: 1.82,
       hull1: '#2b1a08', hull2: '#ffc35c', edge: '#fff0cc',
       core: '#fff6dd', glow: '#ffab3d', accent: '#ffd98a',
       neb: ['#8f4a12', '#6b1f3a', '#7a5a10'],
@@ -445,8 +445,8 @@
   // 保持视野内敌人数稳定：随星区略微增加
   function enemyTarget() {
     var n = Math.min(11, 5 + Math.floor(G.sector * 0.8));
-    // 冲撞主题要多放几架敌机，否则高速掠过时没东西可撞
-    return palette.weapon === 'ram' ? Math.min(12, n + 2) : n;
+    // 冲撞主题是"少而重"的节奏：拦在路上的敌机更少，撞到才更值钱
+    return palette.weapon === 'ram' ? Math.max(2, n - 3) : n;
   }
 
   function spawnEnemyPack(kind, n, initial, x, y) {
@@ -470,7 +470,8 @@
     var i;
     for (i = 0; i < 46; i++) motes.push(newMote(true));
     for (i = 0; i < 8; i++) rings.push(newRing(true));
-    for (i = 0; i < 5; i++) enemies.push(newEnemy(palette.mob, true));
+    var seedN = enemyTarget();
+    for (i = 0; i < seedN; i++) enemies.push(newEnemy(palette.mob, true));
     initNebulas();
   }
 
@@ -741,6 +742,12 @@
     palette = PALETTES[i];
     bullets.length = 0; lasers.length = 0; drones.length = 0;
     weapon.fireT = 0; weapon.chargeT = 0.9; weapon.droneT = 0.6;
+    // 换主题等于换敌人：把场上敌机换成新主题的种类与数量
+    if (G.state !== 'title') {
+      enemies.length = 0;
+      var n = enemyTarget();
+      for (var ei = 0; ei < n; ei++) enemies.push(newEnemy(palette.mob, ei < 3));
+    }
     buildBaked();
     if (sound.ready) sound.note(392 * Math.pow(2, i * 3 / 12), 0.07, 1.4);
   }
@@ -968,7 +975,7 @@
     for (var i = 0; i < drones.length; i++) {
       var d = drones[i];
       var base = G.time * 1.1 + d.phase;
-      var rad = 54 + i * 10;
+      var rad = (54 + i * 10) * (shipScale() / 1.18);
       var tx = player.x + Math.cos(base) * rad;
       var ty = player.y + Math.sin(base) * rad;
       var k = 1 - Math.exp(-7 * dt);
@@ -1166,7 +1173,7 @@
         var mm = motes[k];
         var my = mm.y + Math.sin(G.time * mm.spd + mm.phase) * mm.bob;
         var d2 = dist2(player.x, player.y, mm.x, my);
-        var rr2 = mm.r + 30;
+        var rr2 = mm.r + 30 * (shipScale() / 1.18);
         if (d2 < rr2 * rr2) {
           spawnBurst(mm.x, my, mm.tone, 14, 220);
           G.energy += 1;
@@ -1629,6 +1636,8 @@
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate(d.a || 0);
+      var dk = 0.8 + 0.46 * (shipScale() / 1.18);
+      ctx.scale(dk, dk);
       ctx.globalAlpha = fa;
       // 菱形机身
       ctx.beginPath();
@@ -1827,6 +1836,34 @@
     ctx.ellipse(0, -5, 3.2, 5.2, 0, 0, TAU);
     ctx.fill();
 
+    // 航母专属细节：两条机库甲板灯带 + 缓慢呼吸的停泊环
+    if (p.weapon === 'carrier') {
+      ctx.globalCompositeOperation = 'lighter';
+      for (var sdi = -1; sdi <= 1; sdi += 2) {
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = rgba(p.accent, 0.85);
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(sdi * 7, -13);
+        ctx.lineTo(sdi * 13.5, 8);
+        ctx.stroke();
+        for (var li = 0; li < 3; li++) {
+          var lt = (G.time * 1.5 + li * 0.33 + (sdi > 0 ? 0.5 : 0)) % 1;
+          ctx.globalAlpha = 0.8 * Math.sin(lt * Math.PI);
+          ctx.fillStyle = rgba(p.core, 0.95);
+          ctx.fillRect(sdi * (7 + 6.5 * lt) - 0.8, -13 + 21 * lt - 0.8, 1.6, 1.6);
+        }
+      }
+      ctx.globalAlpha = 0.16;
+      ctx.strokeStyle = rgba(p.edge, 0.8);
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.arc(0, -2, 26 + Math.sin(G.time * 1.1) * 1.5, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
     ctx.globalCompositeOperation = 'source-over';
   }
 
@@ -1871,11 +1908,14 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  function shipScale() { return palette.scale || 1.18; }
+
   function drawPlayerWorld() {
+    var sc = shipScale();
     ctx.save();
     ctx.translate(player.x, player.y);
     ctx.rotate(player.angle);
-    ctx.scale(1.18, 1.18);
+    ctx.scale(sc, sc);
     renderShip();
     ctx.restore();
   }
@@ -1883,9 +1923,9 @@
   // 标题页的展示用飞船（屏幕空间）
   function drawHeroProbe() {
     ctx.save();
-    ctx.translate(W / 2, H * 0.405);
+    ctx.translate(W / 2, H * 0.405 - (shipScale() - 1.18) * 26);
     ctx.rotate(Math.sin(G.time * 0.55) * 0.16);
-    var s = Math.min(W, H) / 900 * 1.7 + 0.5;
+    var s = (Math.min(W, H) / 900 * 1.7 + 0.5) * (shipScale() / 1.18);
     ctx.scale(s, s);
     renderShip(0.16);
     ctx.restore();

@@ -41,8 +41,8 @@ Switching theme swaps your weapon, your enemies, and the colour of the whole sec
 | Theme | Weapon | Feel | Foe |
 |---|---|---|---|
 | **AURORA CYAN** | **ION BURST** | Rapid bolts; the faster you fly, the faster it fires | Drifter — hex hull, tanky |
-| **CRIMSON PULSE** | **PHASE RAM** | No gun at all: builds speed, grows a blade, and shatters foes by flying through them | Prism — splits into two smaller shards |
-| **AMBER EMBER** | **BROOD CARRIER** | Never fires itself: launches escort gunships that orbit and engage | Swarm — fast and numerous |
+| **CRIMSON PULSE** | **PHASE RAM** | No gun at all: builds speed, grows a blade, and shatters foes by flying through them. Few foes on purpose — every hit should feel earned | Prism — splits into two smaller shards |
+| **AMBER EMBER** | **BROOD CARRIER** | Never fires itself: a big, heavy hull (drawn 1.8× and slow) with escort gunships you can watch orbiting it | Swarm — fast and numerous |
 
 ![Aurora Cyan](preview/02-play-cyan.jpg)
 ![Crimson Pulse](preview/05-play-pink.jpg)
@@ -76,7 +76,8 @@ Enemies cannot hurt you — there is no health and no game over. They approach, 
 
 **Feel first (it is a relaxation game)**
 - No health, no timer, no death; the only "penalty" is drifting while you coast.
-- Inertia tuning: 980 px/s² acceleration and exponential damping, like gliding on ice. Each theme has its own cap and grip — 780 px/s @1.35 (cyan), 889 @1.12 (crimson), 757 @1.45 (amber).
+- Inertia tuning: 980 px/s² acceleration and exponential damping, like gliding on ice. Each theme has its own cap, grip and hull size — cyan 780 px/s @1.35 (1.18× hull), crimson 889 @1.12 (1.08×), amber 655 @1.52 (1.82×, an actual carrier: bigger, slower, so the escorts read clearly).
+- Foe density is per theme too: crimson deliberately runs sparse (2 / 3 / 4 … by sector instead of 5 / 6 / 7 …).
 - Generous pickup radii (stardust +30px, ring inner 86%) so a casual pass still rewards you.
 - Auto-fire with predictive aim: enemies pop even if you never aim.
 

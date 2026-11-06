@@ -67,12 +67,13 @@ class Theme:
     mob: str
     speed_mul: float     # 最高速度倍率
     damp: float          # 阻尼 1/s，越小越"滑"
+    scale: float         # 船体绘制缩放（琥珀是航母，画得更大）
 
 
 THEMES = (
-    Theme("aurora", "极光青", "AURORA CYAN", "bolt", "drifter", 1.00, 1.35),
-    Theme("pulse", "绯红脉冲", "CRIMSON PULSE", "ram", "prism", 1.14, 1.12),
-    Theme("ember", "琥珀星火", "AMBER EMBER", "carrier", "swarm", 0.97, 1.45),
+    Theme("aurora", "极光青", "AURORA CYAN", "bolt", "drifter", 1.00, 1.35, 1.18),
+    Theme("pulse", "绯红脉冲", "CRIMSON PULSE", "ram", "prism", 1.14, 1.12, 1.08),
+    Theme("ember", "琥珀星火", "AMBER EMBER", "carrier", "swarm", 0.84, 1.52, 1.82),
 )
 
 # ---------------------------------------------------------------- 通用公式
@@ -202,6 +203,17 @@ def carrier_dps(lv: int) -> float:
     return drone_count(lv) * drone_damage() / drone_interval(lv)
 
 
+def enemy_target(theme: Theme, sector: int) -> int:
+    """屏幕外的敌机补足到多少架（index.html: enemyTarget）
+
+    冲撞主题刻意更稀疏：路上拦路的敌机少，撞到一次才更值钱。
+    """
+    base = min(11, 5 + int(sector * 0.8))
+    if theme.weapon == "ram":
+        return max(2, base - 3)
+    return base
+
+
 # ---------------------------------------------------------------- 飞行手感
 
 
@@ -270,7 +282,14 @@ def report() -> None:
               f"{drone_interval(lv):>7.2f}s{carrier_dps(lv):>9.1f}")
 
     print("\n" + line)
-    print("[武器等级门槛]")
+    print("\n" + line)
+    print("[敌机密度]  每星区屏幕外补足架数")
+    print(f"{'主题':<8}{'第 1 星区':>10}{'第 2 星区':>10}{'第 3 星区':>10}{'第 5 星区':>10}")
+    for th in THEMES:
+        row = "".join(f"{enemy_target(th, sec):>10}" for sec in (1, 2, 3, 5))
+        print(f"{th.name_zh:<8}{row}")
+
+    print("\n[武器等级门槛]")
     for i, need in enumerate(LEVELS, start=1):
         print(f"  LV.{i}  >= {need:>5} 分")
     print("\n提示：分数来源 星尘 +10 / 穿环 +50 / 击落小怪 +30~80 / 点亮星区 +500")
