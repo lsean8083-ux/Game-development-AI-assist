@@ -138,6 +138,59 @@
     paletteIdx: 0
   };
 
+  /* ------------------------------------------------------------
+     文案：中文 / English
+     ------------------------------------------------------------ */
+  var I18N = {
+    zh: {
+      docTitle: '星尘港湾 · Stardust Harbor',
+      titleBig: '星 尘 港 湾',
+      titleSmall: 'STARDUST  HARBOR',
+      tagline: '滑翔 · 穿环 · 收集星尘 —— 没有失败，只有慢慢亮起的星域',
+      start: '开 始 探 索',
+      paletteHint: '点击卡片切换配色 · 也可按 1 / 2 / 3',
+      lit: '星域点亮',
+      dust: '星尘',
+      hint: '按住鼠标朝光标推进 · 松手惯性滑行 · WASD / 方向键同样可用',
+      toast: '星 区 点 亮',
+      paused: '已 暂 停',
+      pauseHint: '按 P 或点击任意处继续 · R 回到标题 · M 静音 · 1/2/3 切换配色',
+      langBtn: 'EN'
+    },
+    en: {
+      docTitle: 'Stardust Harbor',
+      titleBig: 'STARDUST HARBOR',
+      titleSmall: '星 尘 港 湾',
+      tagline: 'Glide · thread the rings · gather stardust — no failure, only sectors slowly waking to light',
+      start: 'START  EXPLORING',
+      paletteHint: 'Click a card to change palette · or press 1 / 2 / 3',
+      lit: 'SECTOR LIT',
+      dust: 'STARDUST',
+      hint: 'Hold to thrust toward the cursor · release to coast · WASD / arrow keys work too',
+      toast: 'SECTOR LIT',
+      paused: 'P A U S E D',
+      pauseHint: 'Press P or click anywhere to resume · R for title · M mute · 1/2/3 palette',
+      langBtn: '中文'
+    }
+  };
+  var lang = 'zh';
+  try {
+    var savedLang = localStorage.getItem('stardust.lang');
+    if (savedLang === 'en' || savedLang === 'zh') lang = savedLang;
+  } catch (err) { /* 隐私模式下忽略 */ }
+  var langRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  function T(key) { return I18N[lang][key]; }
+  function isEN() { return lang === 'en'; }
+  function setLang(v) {
+    if (v !== 'zh' && v !== 'en') return;
+    lang = v;
+    document.title = T('docTitle');
+    document.documentElement.lang = isEN() ? 'en' : 'zh-CN';
+    try { localStorage.setItem('stardust.lang', lang); } catch (err) { /* 忽略 */ }
+  }
+  setLang(lang);
+
   var player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI / 2, thrust: 0, trail: [] };
   var camera = { x: 0, y: 0 };
 
@@ -545,8 +598,7 @@
     G.flash = 1;
     G.toast = {
       t: 3.4,
-      text: '星 区 点 亮',
-      sub: 'SECTOR ' + String(G.sector - 1).padStart(2, '0') + '  CLEARED'
+      sector: G.sector - 1
     };
     sound.sectorUp();
     spawnBurst(player.x, player.y, 1, 40, 380);
@@ -1176,9 +1228,9 @@
       ctx.fillStyle = g;
       rr(bx, by, Math.max(bw * pr, 3), bh, 2); ctx.fill();
     }
-    ctx.font = '500 10px ' + FONT_CN;
+    ctx.font = '500 10px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = 'rgba(220,240,255,0.42)';
-    ctx.fillText('星域点亮 ' + Math.round(pr * 100) + '%', bx, by + 20);
+    ctx.fillText(T('lit') + ' ' + Math.round(pr * 100) + '%', bx, by + 20);
 
     // --- 右侧：星尘计数
     var rx = W - pad - 44;
@@ -1186,9 +1238,9 @@
     ctx.font = '700 22px ' + FONT_EN;
     ctx.fillStyle = '#eef8ff';
     ctx.fillText(String(G.collected), rx, pad + 26);
-    ctx.font = '500 10px ' + FONT_CN;
+    ctx.font = '500 10px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = rgba(p.accent, 0.6);
-    ctx.fillText('星尘', rx, pad + 44);
+    ctx.fillText(T('dust'), rx, pad + 44);
 
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.85;
@@ -1205,9 +1257,9 @@
     if (hint > 0.01) {
       ctx.globalAlpha = hint * 0.8;
       ctx.textAlign = 'center';
-      ctx.font = '500 12px ' + FONT_CN;
+      ctx.font = '500 12px ' + (isEN() ? FONT_EN : FONT_CN);
       ctx.fillStyle = 'rgba(215,238,255,0.92)';
-      ctx.fillText('按住鼠标朝光标推进 · 松手惯性滑行 · WASD / 方向键同样可用', W / 2, H - 42);
+      ctx.fillText(T('hint'), W / 2, H - 42);
       ctx.globalAlpha = 1;
     }
 
@@ -1220,13 +1272,15 @@
       ctx.textBaseline = 'middle';
       ctx.shadowColor = p.glow;
       ctx.shadowBlur = 26;
-      ctx.font = '700 30px ' + FONT_CN;
+      ctx.font = '700 ' + (isEN() ? 26 : 30) + 'px ' + (isEN() ? FONT_EN : FONT_CN);
       ctx.fillStyle = '#f2ffff';
-      ctx.fillText(G.toast.text, W / 2, H * 0.3);
+      if (isEN()) spacedText(T('toast'), W / 2, H * 0.3, 6, 'center');
+      else ctx.fillText(T('toast'), W / 2, H * 0.3);
       ctx.shadowBlur = 0;
       ctx.font = '500 11px ' + FONT_EN;
       ctx.fillStyle = rgba(p.accent, 0.8);
-      spacedText(G.toast.sub, W / 2, H * 0.3 + 34, 3, 'center');
+      spacedText('SECTOR ' + String(G.toast.sector).padStart(2, '0') + '  CLEARED',
+        W / 2, H * 0.3 + 34, 3, 'center');
       ctx.globalAlpha = 1;
       ctx.textBaseline = 'alphabetic';
     }
@@ -1294,18 +1348,33 @@
     ctx.textBaseline = 'middle';
     ctx.shadowColor = p.glow;
     ctx.shadowBlur = 46;
-    ctx.font = '700 ' + Math.round(Math.min(W * 0.062, 68)) + 'px ' + FONT_CN;
     ctx.fillStyle = '#f4ffff';
-    ctx.fillText('星 尘 港 湾', W / 2, ty);
-    ctx.shadowBlur = 0;
+    if (isEN()) {
+      ctx.font = '700 ' + Math.round(Math.min(W * 0.05, 54)) + 'px ' + FONT_EN;
+      spacedText(T('titleBig'), W / 2, ty, 8, 'center');
+      ctx.shadowBlur = 0;
+      ctx.font = '500 13px ' + FONT_CN;
+      ctx.fillStyle = rgba(p.accent, 0.8);
+      spacedText(T('titleSmall'), W / 2, ty + 46, 6, 'center');
+    } else {
+      ctx.font = '700 ' + Math.round(Math.min(W * 0.062, 68)) + 'px ' + FONT_CN;
+      ctx.fillText(T('titleBig'), W / 2, ty);
+      ctx.shadowBlur = 0;
+      ctx.font = '500 12px ' + FONT_EN;
+      ctx.fillStyle = rgba(p.accent, 0.75);
+      spacedText(T('titleSmall'), W / 2, ty + 52, 6.5, 'center');
+    }
 
-    ctx.font = '500 12px ' + FONT_EN;
-    ctx.fillStyle = rgba(p.accent, 0.75);
-    spacedText('STARDUST  HARBOR', W / 2, ty + 52, 6.5, 'center');
-
-    ctx.font = '400 12px ' + FONT_CN;
+    var tagFont = isEN() ? FONT_EN : FONT_CN;
+    var tagSize = 12;
+    ctx.font = '400 ' + tagSize + 'px ' + tagFont;
+    var tagW = ctx.measureText(T('tagline')).width;
+    if (tagW > W * 0.86) {
+      tagSize = Math.max(9, tagSize * (W * 0.86) / tagW);
+      ctx.font = '400 ' + tagSize.toFixed(1) + 'px ' + tagFont;
+    }
     ctx.fillStyle = 'rgba(210,235,250,0.5)';
-    ctx.fillText('滑翔 · 穿环 · 收集星尘 —— 没有失败，只有慢慢亮起的星域', W / 2, ty + 86);
+    ctx.fillText(T('tagline'), W / 2, ty + 86);
 
     // 配色卡片
     for (var i = 0; i < L.cards.length; i++) {
@@ -1331,13 +1400,21 @@
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.font = '600 15px ' + FONT_CN;
-      ctx.fillStyle = '#eaf6ff';
-      ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 - 12);
-
-      ctx.font = '500 8.5px ' + FONT_EN;
-      ctx.fillStyle = rgba(col.accent, 0.7);
-      spacedText(col.en, c.x + 59, c.y + c.h / 2 + 10, 1.8, 'left');
+      if (isEN()) {
+        ctx.font = '600 10.5px ' + FONT_EN;
+        ctx.fillStyle = '#eaf6ff';
+        spacedText(col.en, c.x + 58, c.y + c.h / 2 - 13, 1.4, 'left');
+        ctx.font = '500 11px ' + FONT_CN;
+        ctx.fillStyle = rgba(col.accent, 0.7);
+        ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 + 11);
+      } else {
+        ctx.font = '600 15px ' + FONT_CN;
+        ctx.fillStyle = '#eaf6ff';
+        ctx.fillText(col.name, c.x + 58, c.y + c.h / 2 - 12);
+        ctx.font = '500 8.5px ' + FONT_EN;
+        ctx.fillStyle = rgba(col.accent, 0.7);
+        spacedText(col.en, c.x + 59, c.y + c.h / 2 + 10, 1.8, 'left');
+      }
 
       if (sel) {
         ctx.fillStyle = col.core;
@@ -1362,13 +1439,36 @@
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '600 16px ' + FONT_CN;
     ctx.fillStyle = '#f0ffff';
-    ctx.fillText('开 始 探 索', W / 2, b.y + b.h / 2 + 1);
+    if (isEN()) {
+      ctx.font = '600 13px ' + FONT_EN;
+      spacedText(T('start'), W / 2, b.y + b.h / 2 + 1, 4.5, 'center');
+    } else {
+      ctx.font = '600 16px ' + FONT_CN;
+      ctx.fillText(T('start'), W / 2, b.y + b.h / 2 + 1);
+    }
 
-    ctx.font = '500 10px ' + FONT_CN;
+    ctx.font = '500 10px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = 'rgba(200,228,248,0.45)';
-    ctx.fillText('点击卡片切换配色 · 也可按 1 / 2 / 3', W / 2, b.y + b.h + 26);
+    ctx.fillText(T('paletteHint'), W / 2, b.y + b.h + 26);
+
+    // 右上角：语言切换
+    langRect.x = W - 30 - 66;
+    langRect.y = 26;
+    langRect.w = 66;
+    langRect.h = 28;
+    rr(langRect.x, langRect.y, langRect.w, langRect.h, 14);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '600 11px ' + (isEN() ? FONT_CN : FONT_EN);
+    ctx.fillStyle = 'rgba(226,244,255,0.8)';
+    if (isEN()) spacedText(T('langBtn'), langRect.x + langRect.w / 2, langRect.y + langRect.h / 2 + 1, 2, 'center');
+    else ctx.fillText(T('langBtn'), langRect.x + langRect.w / 2, langRect.y + langRect.h / 2 + 0.5);
 
     ctx.textBaseline = 'alphabetic';
   }
@@ -1380,13 +1480,14 @@
     ctx.textBaseline = 'middle';
     ctx.shadowColor = palette.glow;
     ctx.shadowBlur = 26;
-    ctx.font = '700 34px ' + FONT_CN;
+    ctx.font = '700 ' + (isEN() ? 30 : 34) + 'px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = '#eefcff';
-    ctx.fillText('已 暂 停', W / 2, H / 2 - 18);
+    if (isEN()) spacedText(T('paused'), W / 2, H / 2 - 18, 8, 'center');
+    else ctx.fillText(T('paused'), W / 2, H / 2 - 18);
     ctx.shadowBlur = 0;
-    ctx.font = '500 12px ' + FONT_CN;
+    ctx.font = '500 12px ' + (isEN() ? FONT_EN : FONT_CN);
     ctx.fillStyle = 'rgba(205,232,250,0.65)';
-    ctx.fillText('按 P 或点击任意处继续 · R 回到标题 · M 静音 · 1/2/3 切换配色', W / 2, H / 2 + 38);
+    ctx.fillText(T('pauseHint'), W / 2, H / 2 + 38);
     ctx.textBaseline = 'alphabetic';
   }
 
@@ -1441,6 +1542,10 @@
     if (G.state === 'title') {
       sound.init();
       if (sound.ctx && sound.ctx.state === 'suspended') sound.ctx.resume();
+      if (langRect.w > 0 && inside(pt, langRect)) {
+        setLang(isEN() ? 'zh' : 'en');
+        return;
+      }
       var L = layoutTitle();
       for (var i = 0; i < L.cards.length; i++) {
         if (inside(pt, L.cards[i])) { setPalette(L.cards[i].i); return; }
@@ -1486,6 +1591,7 @@
       else if (G.state === 'paused') G.state = 'play';
     }
     if (k === 'm') toggleMute();
+    if (k === 'l') setLang(isEN() ? 'zh' : 'en');
     if (k === 'r' && (G.state === 'play' || G.state === 'paused')) {
       G.state = 'title';
       resetWorld();
@@ -1526,6 +1632,7 @@
     var pi = parseInt(params.get('palette'), 10) - 1;
     if (pi >= 0 && pi < PALETTES.length) { G.paletteIdx = pi; palette = PALETTES[pi]; }
   }
+  if (params.get('lang') === 'en' || params.get('lang') === 'zh') setLang(params.get('lang'));
   resetWorld();
   if (params.has('autostart')) G.state = 'play';
 
@@ -1546,7 +1653,8 @@
   window.__stardust = {
     G: G, player: player, input: input, sound: sound, camera: camera,
     motes: motes, rings: rings, particles: particles, shocks: shocks,
-    startGame: startGame, setPalette: setPalette, checkSector: checkSector
+    startGame: startGame, setPalette: setPalette, checkSector: checkSector,
+    setLang: setLang, getLang: function () { return lang; }
   };
 })();
 </script>

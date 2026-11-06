@@ -1,74 +1,82 @@
-# 星尘港湾 · Stardust Harbor
+# Stardust Harbor · 星尘港湾
 
-一个 2D 平面、科幻背景的休闲解压小游戏。**零依赖、零安装、零联网**——双击 `index.html` 即可玩。
+**English** | [中文](README.zh-CN.md)
 
-> 滑翔 · 穿环 · 收集星尘 —— 没有失败，只有慢慢亮起的星域。
+A calm 2D side-scrolling space game about gliding, threading rings and gathering stardust.
+**No dependencies, no install, no network** — just double-click `index.html`.
+
+> Glide · thread the rings · gather stardust — no failure, only sectors slowly waking to light.
+
+![Title screen](preview/04-title-en.jpg)
 
 ---
 
-## 怎么玩
+## How to play
 
-| 操作 | 说明 |
+| Input | Action |
 |---|---|
-| 按住鼠标左键拖动 | 朝光标方向推进 |
-| 松开鼠标 | 惯性滑行（带轻柔阻尼，不会急停） |
-| `W A S D` / 方向键 | 键盘推进 |
-| `1` `2` `3` | 切换配色（极光青 / 绯红脉冲 / 琥珀星火） |
-| `M` | 静音 / 取消静音 |
-| `P` / `Esc` | 暂停 / 继续 |
-| `R` | 回到标题（重新开始） |
-| `空格` | 在标题页开始游戏 |
+| Hold left mouse and move | Thrust toward the cursor |
+| Release the mouse | Coast with gentle damping (no hard stop) |
+| `W A S D` / arrow keys | Keyboard thrust |
+| `1` `2` `3` | Switch palette (Aurora Cyan / Crimson Pulse / Amber Ember) |
+| `L` | Switch language (English / 中文) |
+| `M` | Mute / unmute |
+| `P` / `Esc` | Pause / resume |
+| `R` | Back to title (restart) |
+| `Space` | Start from the title screen |
 
-### 目标
-- **收集星尘**：每颗星尘 +1 点亮进度，并奏出一个上行音（五声音阶，连着收集会自然成调）。
-- **穿越星环**：飞进光环内部即可，每个星环 +3.5 进度，伴随冲击波与泛光。
-- 进度满 **46** 即「星区点亮」，进入下一个星区，星域持续变亮。无限循环，**没有任何失败条件**。
+### Goal
 
----
-
-## 设计要点
-
-**玩法（解压优先）**
-- 无血量、无倒计时、无死亡；唯一的"惩罚"是松手后慢慢滑行。
-- 惯性手感：推进加速度 980 px/s²，阻尼 1.35/s，上限速度 780 px/s —— 类似冰面滑行。
-- 收集判定宽松（星尘半径 +30px、星环内圈 86% 半径），随手滑过就有反馈。
-
-**美术（全部程序化生成，无外部素材）**
-- 探测器：分层渐变机身 + 内嵌装甲板 + 发光能量核 + 尾焰 + 翼尖灯 + 缎带式拖尾，三套配色可实时切换。
-- 背景：烘焙底图 + 半分辨率星云合成（4× 上采样）+ 三层视差星野 + 速度线。
-- 反馈：粒子爆发、星环冲击波、全屏泛光、星区点亮提示。
-
-**音频（Web Audio 实时合成，无音频文件）**
-- 环境铺底：55Hz 基频 + 5 个泛音通过低通滤波，0.045Hz 的缓慢呼吸。
-- 收集音：五声音阶上行，三泛音叠加 + 程序生成的卷积混响。
-- 穿环：大三和弦长音；星区点亮：上行琶音。
-
-**性能**
-- 背景底图 / 暗角预烘焙，仅窗口尺寸或配色变化时重绘。
-- 星云在 1/4 分辨率画布合成后一次性放大叠加，大幅降低填充率。
-- 实测（Chrome headless 纯软件光栅，1440×900）：59.3 fps / p50 16.7ms；同环境空场景基线 60 fps。
-- 实体按视野半径回收，屏幕外环带重生并淡入，保证视野内密度稳定。
+- **Gather stardust** — each mote adds +1 light and plays an ascending note (pentatonic, so collecting runs naturally fall into a melody).
+- **Thread the rings** — fly inside the halo; each ring adds +3.5 light with a shockwave and bloom.
+- Fill the bar to **46** and the sector lights up: the counter advances and the sky keeps getting brighter. Endless, with **no losing condition**.
 
 ---
 
-## 文件
+## Design notes
+
+**Feel first**
+- No health, no timer, no death. The only "penalty" is that you keep drifting after you let go.
+- Inertial handling: 980 px/s² thrust, 1.35/s damping, 780 px/s cap — like sliding on ice.
+- Generous hitboxes (motes +30 px, rings at 86% of the inner radius) so casual passes still feel rewarded.
+
+**Art — 100% procedural, no image assets**
+- Probe: layered gradient hull, inset armour plates, glowing core, engine flame, wingtip lights and a ribbon trail; three palettes switch live.
+- Background: pre-baked base layer + half-resolution nebula composited once at 4× upscale + three parallax star layers + speed lines.
+- Feedback: particle bursts, ring shockwaves, full-screen bloom, sector-lit toast.
+
+**Audio — synthesized at runtime with Web Audio, no audio files**
+- Ambient bed: 55 Hz fundamental plus five overtones through a low-pass, breathing at 0.045 Hz.
+- Collect: ascending pentatonic notes, three overtones, procedural convolution reverb.
+- Ring pass: sustained major triad. Sector cleared: ascending arpeggio.
+
+**Performance**
+- Background and vignette are pre-baked and only redrawn when the window size or palette changes.
+- Nebulas are composited on a 1/4-resolution canvas and upscaled once, which removes most of the fill cost.
+- Measured in headless Chrome on pure software rasterization at 1440×900: **59.3 fps / p50 16.7 ms** (empty-canvas baseline in the same environment: 60 fps).
+- Entities recycle at the view radius and respawn on an off-screen band with a fade-in, keeping density stable.
+
+---
+
+## Files
 
 ```
-index.html    # 全部内容：HTML + CSS + JS（约 1550 行），无外部依赖
-README.md     # 本说明
+index.html            # everything: HTML + CSS + JS (~1.6k lines), no external deps
+README.md             # this file (English)
+README.zh-CN.md       # Chinese version
+preview/              # screenshots
 ```
 
-## 开发用参数（可选）
+## Debug URL parameters
 
-URL 参数便于截图与调试：
-
-| 参数 | 作用 |
+| Parameter | Effect |
 |---|---|
-| `?autostart` | 跳过标题页直接进入游戏 |
-| `?palette=2` | 直接使用第二套配色启动 |
+| `?autostart` | Skip the title screen |
+| `?palette=2` | Start with the second palette |
+| `?lang=en` | Start in English (`zh` for Chinese) |
 
-页面还暴露了 `window.__stardust`（状态、玩家、输入、音频、实体数组、`startGame()` 等），仅用于自动化测试，不影响正常玩法。
+The page also exposes `window.__stardust` (state, player, input, audio, entity arrays, `startGame()`, `setLang()`, …) for automated testing only; it does not affect normal play.
 
-## 浏览器
+## Browser support
 
-面向桌面浏览器（Chrome / Edge / Safari / Firefox 现代版本）。使用 Canvas 2D、Web Audio、Pointer Events；无构建步骤。
+Desktop browsers (current Chrome / Edge / Safari / Firefox). Uses Canvas 2D, Web Audio and Pointer Events; no build step.
