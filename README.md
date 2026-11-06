@@ -70,13 +70,31 @@ Crossing a score threshold upgrades the weapon automatically. The HUD shows five
 
 Enemies cannot hurt you — there is no health and no game over. They approach, drift, and get shot down.
 
+Crimson prisms do split, but **a bloodline splits at most 3 generations deep** (2 → 4 → 8, each generation smaller and weaker) and stops entirely once 12 foes are on the field — so it always ends.
+
+---
+
+## Navigation · the space fortress
+
+Every foe comes from one **space fortress**: thick hull, parked 3000–5600 px away, never in view unless you go looking. It can only be found with the navigation system.
+
+- **Bearing pings** — every 300 points is one rank; every 10th rank (i.e. every 3000 points) grants a **12-second** bearing: an arrow at the screen edge pointing at the fortress plus a live distance (`NAV 275m`), or a lock-on ring once it is actually in view. Outside those windows there is no hint at all.
+- **The fortress itself**:
+  - Radius 92 px, 150 HP (plus 40 per sector) with a health bar.
+  - Inside 2600 px it keeps launching foes at you — enemies are not spawned from thin air, they come out of the fortress.
+  - Destroying it awards **2000 points**, shakes the screen, clears nearby foes, and it **respawns somewhere else 9 seconds later**.
+- Bullets and ramming both damage it; one ram hit is roughly 19 damage depending on speed.
+
+![Fortress and navigation](preview/06-fortress.jpg)
+
 ---
 
 ## Design notes
 
 **Feel first (it is a relaxation game)**
 - No health, no timer, no death; the only "penalty" is drifting while you coast.
-- Inertia tuning: 980 px/s² acceleration and exponential damping, like gliding on ice. Each theme has its own cap, grip and hull size — cyan 780 px/s @1.35 (1.18× hull), crimson 889 @1.12 (1.08×), amber 655 @1.52 (1.82×, an actual carrier: bigger, slower, so the escorts read clearly).
+- Inertia tuning: 980 px/s² acceleration and exponential damping, like gliding on ice. Each theme has its own cap, grip and hull size — cyan 780 px/s @1.35 (1.18× hull), crimson 889 @1.12 (1.08×), amber 546 @1.56 (1.82×, an actual carrier: bigger, slower, so the escorts read clearly).
+- Escort gunships fly with real velocity (up to 1500 px/s, nearly three times the carrier's cap), so you can watch them whip around the hull, jostle for position and dive out to fire.
 - Foe density is per theme too: crimson deliberately runs sparse (2 / 3 / 4 … by sector instead of 5 / 6 / 7 …).
 - Generous pickup radii (stardust +30px, ring inner 86%) so a casual pass still rewards you.
 - Auto-fire with predictive aim: enemies pop even if you never aim.
@@ -95,7 +113,7 @@ Enemies cannot hurt you — there is no health and no game over. They approach, 
 **Performance**
 - Base image and vignette are pre-baked; they only redraw on resize or palette change.
 - Nebulae composite into a quarter-resolution canvas and get upscaled once, cutting fill-rate dramatically.
-- Measured (Chrome headless, software rasteriser, 1440×900): 59.3 fps / p50 16.7 ms, against a 60 fps empty-canvas baseline in the same environment.
+- Measured with `py/soak_test.py` (Chrome headless, **software rasteriser, no GPU**, real mouse input): 60 fps at 1024×640, 56 fps at 1280×720, 47 fps at 1440×900. A normal GPU-accelerated browser holds 60.
 - Entities recycle by view radius and respawn just off-screen with a fade-in, keeping density stable.
 
 ---
@@ -109,6 +127,30 @@ README.md             # this file
 README.zh-CN.md       # Chinese version
 preview/              # screenshots
 ```
+
+## Driving the game from Python
+
+`py/soak_test.py` needs nothing but the standard library (it ships a tiny hand-written CDP WebSocket client). It launches Chrome, holds the mouse down and circles, then reads fps and combat stats back out of the page:
+
+```bash
+python3 py/soak_test.py                        # 1440×900 for 12 seconds
+python3 py/soak_test.py --size 1280x720 --seconds 20
+python3 py/soak_test.py --palette 2 --headful  # watch it play in a real window
+```
+
+```
+跑 12s · 配色 1 · 1440x900 …
+运行结果
+  配色        aurora
+  帧率        47 fps
+  分数        1180（LV.2，第 1 星区）
+  击杀        15
+  场上        5 敌机 · 51 星尘 · 0 护航机
+  堡垒        存活 150 HP
+  没有 JS 报错
+```
+
+Exit code 0 means it ran clean with no JS errors.
 
 ## Python mechanics model
 
